@@ -14,7 +14,7 @@ import toast from 'react-hot-toast'
 interface UserProfile {
   id: string; email: string; role: string; company_name: string | null; client_type: string; account_status: string; wallet_balance: number;
   full_name?: string; gst_number?: string; phone_number?: string; organization_role?: string; billing_address?: string; shipping_address?: string;
-  r_cash_balance?: number; // NEW: R-Cash
+  r_cash_balance?: number;
 }
 interface OrderItem { id: string; name: string; price: number; unit: string; quantity: number; }
 interface Order { 
@@ -113,6 +113,7 @@ export default function ClientPortal() {
   }
 
   const handleLogout = async () => { toast('Logging out...', { icon: '👋' }); await supabase.auth.signOut(); window.location.replace('/auth') }
+  
   const getStatusIcon = (status: string) => {
     switch (status) {
       case 'Delivered': return <CheckCircle2 size={20} className="text-emerald-500" />
@@ -184,10 +185,7 @@ export default function ClientPortal() {
 
             {activeTab === 'profile' && (
               <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-300">
-                
-                {/* --- NEW: WALLET AND R-CASH CARDS --- */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
-                  {/* Ledger Card */}
                   {isB2B && (
                     <div className="bg-linear-to-br from-indigo-900 to-slate-900 p-6 md:p-8 rounded-2xl shadow-lg text-white flex flex-col justify-between gap-6 relative overflow-hidden">
                       <div className="flex items-center gap-4 w-full relative z-10">
@@ -198,7 +196,6 @@ export default function ClientPortal() {
                     </div>
                   )}
 
-                  {/* R-Cash Card */}
                   <div className={`bg-linear-to-br from-amber-500 to-orange-600 p-6 md:p-8 rounded-2xl shadow-lg text-white flex flex-col justify-between gap-6 relative overflow-hidden ${!isB2B ? 'md:col-span-2' : ''}`}>
                     <div className="flex items-center gap-4 w-full relative z-10">
                       <div className="w-14 h-14 bg-white/20 rounded-full flex items-center justify-center backdrop-blur-sm shrink-0"><Sparkles size={28} className="text-amber-100" /></div>
@@ -281,7 +278,6 @@ export default function ClientPortal() {
         <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-12">
           <div className="space-y-4"><div className="flex items-center gap-2"><div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-white font-bold text-sm shadow-inner">R</div><span className="text-xl font-bold text-white tracking-tight">Raj Gharona</span></div><p className="text-sm leading-relaxed max-w-xs">Premium milling and fresh grains delivered directly to your home or B2B facility.</p><div className="inline-flex items-center gap-2 px-3 py-1.5 bg-slate-800 rounded-lg text-sm font-mono text-slate-300"><span className="font-bold text-white">FSSAI:</span> 100210XXXXXX00</div></div>
           <div className="space-y-4"><h4 className="text-white font-bold uppercase tracking-wider text-sm">Customer Support</h4><div className="space-y-3">
-            {/* UPDATED WA NUMBER */}
             <a href="tel:+917683975998" className="flex items-center gap-3 text-sm hover:text-white transition-colors"><Phone size={16} className="text-indigo-400" /> +91 76839 75998 (Mon-Sat)</a>
             <a href="mailto:support@rajgharona.com" className="flex items-center gap-3 text-sm hover:text-white transition-colors"><Mail size={16} className="text-indigo-400" /> support@rajgharona.com</a>
           </div></div>
@@ -290,10 +286,9 @@ export default function ClientPortal() {
         <div className="max-w-7xl mx-auto mt-12 pt-8 border-t border-slate-800 text-sm text-center md:text-left flex flex-col md:flex-row justify-between items-center gap-4"><p>&copy; {new Date().getFullYear()} Raj Gharona. All rights reserved.</p><p className="text-slate-500">Secure Payments processed locally in India.</p></div>
       </footer>
 
-      {/* UPDATED WA BUBBLE */}
       <a href="https://wa.me/917683975998" target="_blank" rel="noreferrer" className="fixed bottom-6 right-6 md:bottom-10 md:right-10 bg-[#25D366] text-white p-4 rounded-full shadow-2xl hover:scale-110 transition-transform z-50 flex items-center justify-center cursor-pointer hover:shadow-[#25D366]/30 print:hidden" title="Chat with us on WhatsApp"><MessageCircle size={32} fill="white" /></a>
 
-      {/* Modals omitted, unchanged */}
+      {/* --- MODAL: RELOAD WALLET --- */}
       {showWalletModal && (
         <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center p-4">
           <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={() => setShowWalletModal(false)}></div>
@@ -306,6 +301,93 @@ export default function ClientPortal() {
               <div><label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1">Bank UTR / Reference No.</label><input required type="text" value={utrNumber} onChange={(e) => setUtrNumber(e.target.value)} className="w-full p-3.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500" placeholder="e.g. UBIN0123456789" /></div>
               <button disabled={isSubmitting} type="submit" className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-4 rounded-xl transition-all shadow-md mt-4 flex items-center justify-center active:scale-95">{isSubmitting ? <Loader2 size={18} className="animate-spin" /> : 'Submit for Admin Approval'}</button>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* --- MODAL: INVOICE VIEWER & PRINT --- */}
+      {selectedOrder && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 print:p-0">
+          {/* Background overlay - hidden when printing */}
+          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-md print:hidden" onClick={() => setSelectedOrder(null)}></div>
+          
+          {/* Invoice Container */}
+          <div className="relative bg-white rounded-3xl shadow-2xl w-full max-w-3xl overflow-hidden animate-in zoom-in-95 duration-200 print:shadow-none print:rounded-none print:w-full print:max-w-none">
+            
+            {/* Header / Actions - hidden when printing */}
+            <div className="flex items-center justify-between p-6 border-b border-slate-100 bg-slate-50/50 print:hidden">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white"><ReceiptText size={20}/></div>
+                <div><h3 className="font-bold text-slate-900">Order Invoice</h3><p className="text-xs text-slate-500">#{selectedOrder.id.toUpperCase()}</p></div>
+              </div>
+              <div className="flex gap-2">
+                <button onClick={() => window.print()} className="flex items-center gap-2 bg-slate-900 hover:bg-slate-800 text-white px-5 py-2.5 rounded-xl font-bold transition-all shadow-sm"><Printer size={18}/> Print</button>
+                <button onClick={() => setSelectedOrder(null)} className="p-2.5 text-slate-400 hover:bg-white hover:text-rose-500 rounded-xl transition-all border border-transparent hover:border-slate-100"><X size={24}/></button>
+              </div>
+            </div>
+
+            {/* Printable Content */}
+            <div className="p-8 md:p-12 overflow-y-auto max-h-[80vh] print:max-h-none print:p-4">
+              <div className="flex flex-col md:flex-row justify-between gap-8 mb-12">
+                <div>
+                  <div className="flex items-center gap-2 mb-4"><div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-white font-bold">R</div><span className="text-2xl font-bold text-slate-900">Raj Gharona</span></div>
+                  <div className="text-sm text-slate-500 space-y-1">
+                    <p className="font-bold text-slate-900">Milling Facility Address Line</p>
+                    <p>City, State, PIN</p>
+                    <p>GSTIN: 07XXXXX0000X1Z1</p>
+                    <p>FSSAI: 100210XXXXXX00</p>
+                  </div>
+                </div>
+                <div className="text-left md:text-right">
+                  <h2 className="text-4xl font-black text-slate-200 uppercase mb-4 print:text-slate-400">Invoice</h2>
+                  <div className="text-sm space-y-1">
+                    <p><span className="text-slate-400">Order ID:</span> <span className="font-mono font-bold text-slate-900">{selectedOrder.id.split('-')[0].toUpperCase()}</span></p>
+                    <p><span className="text-slate-400">Date:</span> <span className="font-bold text-slate-900">{new Date(selectedOrder.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}</span></p>
+                    <p><span className="text-slate-400">Payment:</span> <span className="font-bold text-slate-900 uppercase">{selectedOrder.payment_method || 'Online'}</span></p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-12 mb-12 border-y border-slate-100 py-8">
+                <div>
+                  <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">Billed To</h4>
+                  <div className="text-sm space-y-1">
+                    <p className="font-bold text-lg text-slate-900">{profile.company_name || profile.full_name}</p>
+                    <p className="text-slate-600 whitespace-pre-wrap">{profile.billing_address}</p>
+                    {profile.gst_number && <p className="pt-2"><span className="font-bold">GSTIN:</span> {profile.gst_number}</p>}
+                  </div>
+                </div>
+                <div>
+                  <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">Shipping Address</h4>
+                  <div className="text-sm space-y-1">
+                    <p className="text-slate-600 whitespace-pre-wrap">{profile.shipping_address}</p>
+                    <p className="pt-2"><span className="font-bold">Phone:</span> {profile.phone_number}</p>
+                  </div>
+                </div>
+              </div>
+
+              <table className="w-full mb-12">
+                <thead>
+                  <tr className="border-b-2 border-slate-900"><th className="text-left py-4 text-sm font-bold text-slate-900 uppercase">Item Description</th><th className="text-center py-4 text-sm font-bold text-slate-900 uppercase">Qty</th><th className="text-right py-4 text-sm font-bold text-slate-900 uppercase">Rate</th><th className="text-right py-4 text-sm font-bold text-slate-900 uppercase">Amount</th></tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {selectedOrder.order_items.map((item, idx) => (
+                    <tr key={idx}><td className="py-4 text-sm font-medium text-slate-900">{item.name}</td><td className="py-4 text-center text-sm text-slate-600">{item.quantity} {item.unit}</td><td className="py-4 text-right text-sm text-slate-600">₹{item.price.toLocaleString()}</td><td className="py-4 text-right text-sm font-bold text-slate-900">₹{(item.quantity * item.price).toLocaleString()}</td></tr>
+                  ))}
+                </tbody>
+              </table>
+
+              <div className="flex justify-end">
+                <div className="w-full md:w-64 space-y-3">
+                  <div className="flex justify-between text-sm text-slate-500"><span>Subtotal:</span><span className="font-medium text-slate-900">₹{(selectedOrder.total_amount - (selectedOrder.freight_charges || 0) - (selectedOrder.toll_charges || 0) - (selectedOrder.loading_charges || 0) - (selectedOrder.packaging_charges || 0) - (selectedOrder.gateway_charges || 0) - (selectedOrder.other_charges || 0)).toLocaleString()}</span></div>
+                  {(selectedOrder.freight_charges || 0) > 0 && <div className="flex justify-between text-sm text-slate-500"><span>Freight & Transport:</span><span className="font-medium text-slate-900">₹{selectedOrder.freight_charges?.toLocaleString()}</span></div>}
+                  {((selectedOrder.loading_charges || 0) + (selectedOrder.packaging_charges || 0)) > 0 && <div className="flex justify-between text-sm text-slate-500"><span>Handling & Packing:</span><span className="font-medium text-slate-900">₹{((selectedOrder.loading_charges || 0) + (selectedOrder.packaging_charges || 0)).toLocaleString()}</span></div>}
+                  <div className="flex justify-between items-center pt-3 border-t-2 border-slate-900"><span className="font-bold text-slate-900 uppercase tracking-wider">Total</span><span className="text-2xl font-black text-indigo-600">₹{selectedOrder.total_amount.toLocaleString()}</span></div>
+                </div>
+              </div>
+
+              <div className="mt-24 pt-8 border-t border-slate-100 text-center"><p className="text-xs text-slate-400 italic">This is a computer-generated document and does not require a physical signature.</p></div>
+            </div>
           </div>
         </div>
       )}

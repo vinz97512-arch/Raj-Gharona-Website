@@ -17,7 +17,6 @@ interface Product {
   image_url?: string; image_urls?: string[];
 }
 
-// 1. Defined a strict interface for the Razorpay success response
 interface RazorpaySuccessResponse {
   razorpay_payment_id: string;
   razorpay_order_id: string;
@@ -152,21 +151,19 @@ export default function Storefront() {
         amount: cartTotal * 100, 
         currency: 'INR', 
         name: 'Raj Gharona', 
-        // 2. Added type to the handler response
         handler: async (response: RazorpaySuccessResponse) => { 
           await finalizeOrderInDb(`Razorpay (${response.razorpay_payment_id})`, 'Paid', 'New Order') 
         },
         prefill: { name: finalCustomerName, email: session.user.email }, 
         theme: { color: '#4f46e5' } 
       }
-      // 3. Fixed 'window' type error by casting to any
       const rzp = new (window as any).Razorpay(options); 
       rzp.open()
     }
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 font-sans overflow-x-hidden flex flex-col relative">
+    <div className="min-h-screen bg-slate-50 font-sans overflow-x-hidden flex flex-col relative text-slate-900">
       <nav className="bg-white border-b border-slate-200 sticky top-0 z-40 shadow-sm shrink-0">
         <div className="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -179,7 +176,7 @@ export default function Storefront() {
           <div className="flex items-center gap-4 sm:gap-6">
             <div className="hidden md:flex relative">
               <Search className="absolute left-3 top-2.5 text-slate-400" size={18} />
-              <input type="text" placeholder="Search..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-10 pr-4 py-2 bg-slate-100 border-transparent focus:bg-white focus:border-indigo-500 rounded-full text-sm w-64 transition-all outline-none" />
+              <input type="text" placeholder="Search..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-10 pr-4 py-2 bg-slate-100 border-transparent focus:bg-white focus:border-indigo-500 rounded-full text-sm w-64 transition-all outline-none text-slate-900" />
             </div>
             {userRole ? (
               <Link href={userRole === 'admin' ? '/admin' : '/account'} className="hidden md:flex items-center gap-2 text-sm font-semibold text-slate-600">
@@ -204,9 +201,9 @@ export default function Storefront() {
         <div className="fixed inset-0 z-50 flex justify-start md:hidden">
           <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={() => setIsMobileMenuOpen(false)}></div>
           <div className="relative w-4/5 max-w-sm bg-white h-full shadow-2xl flex flex-col animate-in slide-in-from-left duration-300">
-            <div className="flex items-center justify-between p-6 border-b"><div className="flex items-center gap-2 font-bold text-slate-900">Raj Gharona</div><button onClick={() => setIsMobileMenuOpen(false)}><X size={20} /></button></div>
+            <div className="flex items-center justify-between p-6 border-b"><div className="flex items-center gap-2 font-bold text-slate-900">Raj Gharona</div><button onClick={() => setIsMobileMenuOpen(false)}><X size={20} className="text-slate-900"/></button></div>
             <div className="p-6 space-y-6 flex-1 overflow-y-auto">
-              <div className="relative"><Search className="absolute left-4 top-3.5 text-slate-400" /><input type="text" placeholder="Search catalog..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-12 pr-4 py-3.5 w-full bg-slate-100 rounded-xl outline-none" /></div>
+              <div className="relative"><Search className="absolute left-4 top-3.5 text-slate-400" /><input type="text" placeholder="Search catalog..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-12 pr-4 py-3.5 w-full bg-slate-100 rounded-xl outline-none text-slate-900" /></div>
               <div className="space-y-4 pt-4 border-t">{userRole ? <Link href="/account" className="flex items-center gap-3 font-bold text-slate-700"><UserCircle size={24} /> My Account</Link> : <Link href="/auth" className="flex items-center gap-3 font-bold text-slate-700"><LogIn size={24} /> Sign In</Link>}</div>
             </div>
           </div>
@@ -214,41 +211,41 @@ export default function Storefront() {
       )}
 
       <header className="bg-slate-900 text-white py-12 px-6 shrink-0">
-        <div className="max-w-7xl mx-auto"><h1 className="text-3xl md:text-5xl font-bold mb-4 tracking-tight">Premium Milling & Grains</h1><p className="text-slate-400 max-w-2xl">{clientType === 'D2C' ? "Freshly milled and delivered to your doorstep." : `B2B Portal: ${clientType} volume pricing active.`}</p></div>
+        <div className="max-w-7xl mx-auto"><h1 className="text-3xl md:text-5xl font-bold mb-4 tracking-tight text-white">Premium Milling & Grains</h1><p className="text-slate-300 max-w-2xl">{clientType === 'D2C' ? "Freshly milled and delivered to your doorstep." : `B2B Portal: ${clientType} volume pricing active.`}</p></div>
       </header>
 
       <main className="max-w-7xl mx-auto px-6 py-12 flex-1 w-full">
-        {!isLoading && products.length > 0 && <div className="flex gap-3 overflow-x-auto pb-6 hide-scrollbar">{categories.map(category => <button key={category} onClick={() => setSelectedCategory(category)} className={`whitespace-nowrap px-5 py-2.5 rounded-full text-sm font-bold transition-all ${selectedCategory === category ? 'bg-indigo-600 text-white' : 'bg-white text-slate-600 border border-slate-200'}`}>{category}</button>)}</div>}
+        {!isLoading && products.length > 0 && <div className="flex gap-3 overflow-x-auto pb-6 hide-scrollbar">{categories.map(category => <button key={category} onClick={() => setSelectedCategory(category)} className={`whitespace-nowrap px-5 py-2.5 rounded-full text-sm font-bold transition-all ${selectedCategory === category ? 'bg-indigo-600 text-white' : 'bg-white text-slate-700 border border-slate-200'}`}>{category}</button>)}</div>}
         
-        {isLoading ? <div className="py-24 flex justify-center"><Loader2 size={48} className="animate-spin text-indigo-600" /></div> : filteredProducts.length === 0 ? <div className="text-center py-24 text-slate-400">No products found.</div> : 
+        {isLoading ? <div className="py-24 flex justify-center"><Loader2 size={48} className="animate-spin text-indigo-600" /></div> : filteredProducts.length === 0 ? <div className="text-center py-24 text-slate-600">No products found.</div> : 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 animate-in fade-in duration-500">
             {filteredProducts.map((p) => (
               <div key={p.id} onClick={() => { setSelectedProduct(p); setActiveImageIndex(0); setModalQuantity(1); }} className="bg-white border border-slate-200 rounded-2xl p-5 hover:shadow-xl transition-all cursor-pointer group flex flex-col h-full">
                 <div className="w-full aspect-square bg-slate-50 rounded-xl mb-4 overflow-hidden flex items-center justify-center">
-                  {(p.image_urls?.[0] || p.image_url) ? <img src={p.image_urls?.[0] || p.image_url} alt="" className="w-full h-full object-cover group-hover:scale-105 transition-transform" /> : <span className="text-slate-300">No Image</span>}
+                  {(p.image_urls?.[0] || p.image_url) ? <img src={p.image_urls?.[0] || p.image_url} alt="" className="w-full h-full object-cover group-hover:scale-105 transition-transform" /> : <span className="text-slate-400">No Image</span>}
                 </div>
-                <div className="flex-1"><span className="text-[10px] font-bold text-indigo-600 uppercase block mb-1">{p.category}</span><h3 className="font-bold text-slate-900 mb-2">{p.name}</h3><p className="text-slate-500 text-xs line-clamp-2">{p.description}</p></div>
-                <div className="mt-4 pt-4 border-t flex items-center justify-between"><div><span className="text-lg font-bold text-slate-900">₹{getDisplayPrice(p)}</span><span className="text-[10px] text-slate-500 ml-1">/{p.unit}</span></div><button className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center group-hover:bg-indigo-600 group-hover:text-white transition-colors"><ShoppingCart size={18}/></button></div>
+                <div className="flex-1"><span className="text-[10px] font-bold text-indigo-600 uppercase block mb-1">{p.category}</span><h3 className="font-bold text-slate-900 mb-2">{p.name}</h3><p className="text-slate-600 text-xs line-clamp-2">{p.description}</p></div>
+                <div className="mt-4 pt-4 border-t flex items-center justify-between"><div><span className="text-lg font-bold text-slate-900">₹{getDisplayPrice(p)}</span><span className="text-[10px] text-slate-600 ml-1">/{p.unit}</span></div><button className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center group-hover:bg-indigo-600 group-hover:text-white transition-colors"><ShoppingCart size={18} className="text-slate-700 group-hover:text-white"/></button></div>
               </div>
             ))}
           </div>
         }
       </main>
 
-      <footer className="bg-slate-900 text-slate-400 py-12 px-6 border-t border-slate-800"><div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-12"><div><div className="flex items-center gap-2 mb-4 font-bold text-white">Raj Gharona</div><p className="text-sm">Premium milling directly to your facility.</p><div className="mt-4 inline-block px-3 py-1 bg-slate-800 rounded text-xs font-mono">FSSAI: 100210XXXXXX00</div></div><div><h4 className="text-white font-bold uppercase text-xs mb-4">Support</h4><div className="space-y-3 text-sm"><a href="tel:+917683975998" className="flex items-center gap-3"><Phone size={16}/> +91 76839 75998</a><a href="mailto:support@rajgharona.com" className="flex items-center gap-3"><Mail size={16}/> support@rajgharona.com</a></div></div><div><h4 className="text-white font-bold uppercase text-xs mb-4">Legal</h4><div className="flex flex-col space-y-3 text-sm"><Link href="#">Terms</Link><Link href="#">Privacy</Link><Link href="#">Refunds</Link></div></div></div></footer>
+      <footer className="bg-slate-900 text-slate-400 py-12 px-6 border-t border-slate-800"><div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-12"><div><div className="flex items-center gap-2 mb-4 font-bold text-white">Raj Gharona</div><p className="text-sm text-slate-300">Premium milling directly to your facility.</p><div className="mt-4 inline-block px-3 py-1 bg-slate-800 rounded text-xs font-mono text-slate-200">FSSAI: 100210XXXXXX00</div></div><div><h4 className="text-white font-bold uppercase text-xs mb-4">Support</h4><div className="space-y-3 text-sm"><a href="tel:+917683975998" className="flex items-center gap-3 text-slate-300"><Phone size={16}/> +91 76839 75998</a><a href="mailto:support@rajgharona.com" className="flex items-center gap-3 text-slate-300"><Mail size={16}/> support@rajgharona.com</a></div></div><div><h4 className="text-white font-bold uppercase text-xs mb-4">Legal</h4><div className="flex flex-col space-y-3 text-sm"><Link href="#" className="text-slate-300">Terms</Link><Link href="#" className="text-slate-300">Privacy</Link><Link href="#" className="text-slate-300">Refunds</Link></div></div></div></footer>
 
       <a href="https://wa.me/917683975998" target="_blank" rel="noreferrer" className="fixed bottom-6 right-6 bg-[#25D366] text-white p-4 rounded-full shadow-2xl z-50"><MessageCircle size={32} fill="white" /></a>
 
       {selectedProduct && (
         <div className="fixed inset-0 z-70 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm transition-opacity" onClick={() => setSelectedProduct(null)}></div>
+          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm transition-opacity" onClick={() => setSelectedProduct(null)}></div>
           <div className="relative bg-white rounded-3xl shadow-2xl w-full max-w-4xl overflow-hidden flex flex-col md:flex-row animate-in fade-in zoom-in-95 duration-200 max-h-[90vh]">
-            <button onClick={() => setSelectedProduct(null)} className="absolute top-4 right-4 z-10 w-10 h-10 bg-white/80 rounded-full flex items-center justify-center shadow-sm"><X size={20} /></button>
+            <button onClick={() => setSelectedProduct(null)} className="absolute top-4 right-4 z-10 w-10 h-10 bg-white/80 rounded-full flex items-center justify-center shadow-sm"><X size={20} className="text-slate-900"/></button>
             <div className="w-full md:w-1/2 bg-slate-100 relative group overflow-hidden flex flex-col">
               <div className="flex-1 flex items-center justify-center overflow-hidden">
                 {(selectedProduct.image_urls?.[activeImageIndex] || selectedProduct.image_url) ? (
                    <img src={selectedProduct.image_urls?.[activeImageIndex] || selectedProduct.image_url} alt="" className="w-full h-full object-cover" />
-                ) : <span className="text-slate-400">No Photo</span>}
+                ) : <span className="text-slate-500">No Photo</span>}
               </div>
               {selectedProduct.image_urls && selectedProduct.image_urls.length > 1 && (
                 <div className="p-4 bg-white/50 backdrop-blur flex gap-2 overflow-x-auto justify-center">
@@ -261,26 +258,26 @@ export default function Storefront() {
               )}
               {selectedProduct.image_urls && selectedProduct.image_urls.length > 1 && (
                 <>
-                  <button onClick={() => setActiveImageIndex((prev) => (prev === 0 ? selectedProduct.image_urls!.length - 1 : prev - 1))} className="absolute left-2 top-1/2 -translate-y-1/2 bg-white/80 p-2 rounded-full shadow opacity-0 group-hover:opacity-100 transition-opacity"><ChevronLeft size={20}/></button>
-                  <button onClick={() => setActiveImageIndex((prev) => (prev === selectedProduct.image_urls!.length - 1 ? 0 : prev + 1))} className="absolute right-2 top-1/2 -translate-y-1/2 bg-white/80 p-2 rounded-full shadow opacity-0 group-hover:opacity-100 transition-opacity"><ChevronRight size={20}/></button>
+                  <button onClick={() => setActiveImageIndex((prev) => (prev === 0 ? selectedProduct.image_urls!.length - 1 : prev - 1))} className="absolute left-2 top-1/2 -translate-y-1/2 bg-white/80 p-2 rounded-full shadow opacity-0 group-hover:opacity-100 transition-opacity text-slate-900"><ChevronLeft size={20}/></button>
+                  <button onClick={() => setActiveImageIndex((prev) => (prev === selectedProduct.image_urls!.length - 1 ? 0 : prev + 1))} className="absolute right-2 top-1/2 -translate-y-1/2 bg-white/80 p-2 rounded-full shadow opacity-0 group-hover:opacity-100 transition-opacity text-slate-900"><ChevronRight size={20}/></button>
                 </>
               )}
             </div>
             <div className="w-full md:w-1/2 p-8 overflow-y-auto">
               <span className="text-xs font-bold text-indigo-600 uppercase mb-2 block">{selectedProduct.category}</span>
               <h2 className="text-3xl font-bold text-slate-900 mb-4">{selectedProduct.name}</h2>
-              <p className="text-slate-600 mb-6">{selectedProduct.description}</p>
+              <p className="text-slate-700 mb-6">{selectedProduct.description}</p>
               <div className="bg-slate-50 p-6 rounded-2xl border mb-8">
-                <div className="flex items-baseline gap-2 mb-1"><span className="text-4xl font-bold">₹{getDisplayPrice(selectedProduct)}</span><span className="text-slate-500 font-medium">per {selectedProduct.unit}</span></div>
-                {clientType !== 'D2C' && <p className="text-xs text-emerald-600 font-bold">✓ B2B Volume discount applied</p>}
+                <div className="flex items-baseline gap-2 mb-1"><span className="text-4xl font-bold text-slate-900">₹{getDisplayPrice(selectedProduct)}</span><span className="text-slate-700 font-bold">per {selectedProduct.unit}</span></div>
+                {clientType !== 'D2C' && <p className="text-xs text-emerald-700 font-bold">✓ B2B Volume discount applied</p>}
               </div>
               <div className="flex gap-4">
-                <div className="w-36 flex border-2 border-slate-200 rounded-xl overflow-hidden h-14">
-                  <button onClick={() => setModalQuantity(Math.max(1, modalQuantity - 1))} className="w-12 h-full flex items-center justify-center font-bold text-slate-600 transition-colors">-</button>
+                <div className="w-36 flex border-2 border-slate-200 rounded-xl overflow-hidden h-14 bg-white">
+                  <button onClick={() => setModalQuantity(Math.max(1, modalQuantity - 1))} className="w-12 h-full flex items-center justify-center font-bold text-slate-800 transition-colors hover:bg-slate-100">-</button>
                   <div className="flex-1 flex items-center justify-center font-bold text-slate-900 border-x border-slate-200">{modalQuantity}</div>
-                  <button onClick={() => setModalQuantity(modalQuantity + 1)} className="w-12 h-full flex items-center justify-center font-bold text-slate-600 transition-colors">+</button>
+                  <button onClick={() => setModalQuantity(modalQuantity + 1)} className="w-12 h-full flex items-center justify-center font-bold text-slate-800 transition-colors hover:bg-slate-100">+</button>
                 </div>
-                <button onClick={handleAddToCart} className="flex-1 bg-slate-900 text-white font-bold py-4 rounded-xl shadow-lg active:scale-95 transition-all">Add to Cart</button>
+                <button onClick={handleAddToCart} className="flex-1 bg-slate-900 hover:bg-slate-800 text-white font-bold py-4 rounded-xl shadow-lg active:scale-95 transition-all">Add to Cart</button>
               </div>
             </div>
           </div>
@@ -289,25 +286,31 @@ export default function Storefront() {
 
       {isCartOpen && (
         <div className="fixed inset-0 z-70 flex justify-end">
-          <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={() => setIsCartOpen(false)}></div>
+          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setIsCartOpen(false)}></div>
           <div className="relative w-full max-w-md bg-white h-full shadow-2xl flex flex-col animate-in slide-in-from-right duration-300">
-            <div className="flex items-center justify-between p-6 border-b"><h2 className="text-xl font-bold text-slate-900 flex items-center gap-2"><ShoppingCart size={24} className="text-indigo-600" /> Your Cart</h2><button onClick={() => setIsCartOpen(false)}><X size={20} /></button></div>
+            <div className="flex items-center justify-between p-6 border-b"><h2 className="text-xl font-bold text-slate-900 flex items-center gap-2"><ShoppingCart size={24} className="text-indigo-600" /> Your Cart</h2><button onClick={() => setIsCartOpen(false)}><X size={20} className="text-slate-900"/></button></div>
             <div className="flex-1 overflow-y-auto p-6 space-y-6">
-              {cartItems.length === 0 ? <div className="text-center py-24 text-slate-400">Cart is empty.</div> : cartItems.map((item) => (
+              {cartItems.length === 0 ? <div className="text-center py-24 text-slate-500 font-medium">Cart is empty.</div> : cartItems.map((item) => (
                 <div key={item.id} className="flex gap-4">
                   <div className="w-16 h-16 rounded-xl bg-slate-100 overflow-hidden border border-slate-200 shrink-0">{item.image && <img src={item.image} className="w-full h-full object-cover" alt=""/>}</div>
                   <div className="flex-1 flex flex-col justify-between">
-                    <div><h4 className="font-bold text-slate-900 text-sm">{item.name}</h4><p className="text-[10px] text-slate-500">₹{item.price} / {item.unit}</p></div>
-                    <div className="flex items-center justify-between mt-2"><div className="flex items-center border border-slate-200 rounded-lg overflow-hidden h-8"><button onClick={() => updateQuantity(item.id, item.quantity - 1)} className="w-8 h-full bg-slate-50 font-bold">-</button><span className="w-8 text-center text-xs font-bold">{item.quantity}</span><button onClick={() => updateQuantity(item.id, item.quantity + 1)} className="w-8 h-full bg-slate-50 font-bold">+</button></div><button onClick={() => removeFromCart(item.id)} className="p-1 text-rose-500"><Trash2 size={16}/></button></div>
+                    <div><h4 className="font-bold text-slate-900 text-sm">{item.name}</h4><p className="text-xs font-bold text-slate-600">₹{item.price} / {item.unit}</p></div>
+                    <div className="flex items-center justify-between mt-2"><div className="flex items-center border border-slate-300 rounded-lg overflow-hidden h-8 bg-white"><button onClick={() => updateQuantity(item.id, item.quantity - 1)} className="w-8 h-full bg-slate-50 font-bold text-slate-800 hover:bg-slate-100">-</button><span className="w-8 text-center text-xs font-bold text-slate-900">{item.quantity}</span><button onClick={() => updateQuantity(item.id, item.quantity + 1)} className="w-8 h-full bg-slate-50 font-bold text-slate-800 hover:bg-slate-100">+</button></div><button onClick={() => removeFromCart(item.id)} className="p-1 text-rose-500 hover:bg-rose-50 rounded"><Trash2 size={16}/></button></div>
                   </div>
                 </div>
               ))}
             </div>
             {cartItems.length > 0 && (
-              <div className="p-6 bg-slate-50 border-t space-y-4">
-                <div className="flex justify-between font-bold text-slate-900"><span>Subtotal</span><span>₹{cartTotal.toLocaleString()}</span></div>
-                {clientType === 'D2C' && <select value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value as any)} className="w-full p-3 border rounded-xl outline-none"><option value="online">Online Pay</option><option value="cod">Cash on Delivery</option><option value="wallet">App Wallet</option></select>}
-                <button onClick={handleCheckout} disabled={isCheckingOut} className="w-full py-4 bg-slate-900 text-white font-bold rounded-xl shadow-lg active:scale-[0.98] transition-all flex justify-between px-6">{isCheckingOut ? <Loader2 size={20} className="animate-spin" /> : <span>{clientType === 'D2C' ? 'Checkout' : 'Submit Request'}</span>}<span>₹{cartTotal.toLocaleString()}</span></button>
+              <div className="p-6 bg-slate-50 border-t border-slate-200 space-y-4">
+                <div className="flex justify-between font-bold text-slate-900 text-lg"><span>Subtotal</span><span>₹{cartTotal.toLocaleString()}</span></div>
+                {clientType === 'D2C' && (
+                  <select value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value as any)} className="w-full p-3.5 border border-slate-300 rounded-xl outline-none text-slate-900 bg-white font-bold shadow-sm">
+                    <option value="online" className="text-slate-900 bg-white">Pay Online (UPI / Cards)</option>
+                    <option value="cod" className="text-slate-900 bg-white">Cash on Delivery</option>
+                    <option value="wallet" className="text-slate-900 bg-white">Pay via App Wallet</option>
+                  </select>
+                )}
+                <button onClick={handleCheckout} disabled={isCheckingOut} className="w-full py-4 bg-slate-900 text-white font-bold rounded-xl shadow-lg active:scale-[0.98] transition-all flex justify-between px-6 items-center">{isCheckingOut ? <Loader2 size={20} className="animate-spin" /> : <span>{clientType === 'D2C' ? 'Checkout' : 'Submit Request'}</span>}<span>₹{cartTotal.toLocaleString()}</span></button>
               </div>
             )}
           </div>
