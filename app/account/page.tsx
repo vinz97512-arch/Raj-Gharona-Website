@@ -1,15 +1,17 @@
 'use client'
 
+
 import { useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { 
-  User, Building2, Package, Receipt, LogOut, Loader2, 
+import {
+  User, Building2, Package, Receipt, LogOut, Loader2,
   ShieldCheck, Wallet, RotateCcw, Truck, CheckCircle2, Clock, X, ReceiptText, Printer, Phone, Mail, MessageCircle, Save, ClipboardList, Calculator, Sparkles
 } from 'lucide-react'
 import { useCart } from '../context/CartContext'
 import toast from 'react-hot-toast'
+
 
 interface UserProfile {
   id: string; email: string; role: string; company_name: string | null; client_type: string; account_status: string; wallet_balance: number;
@@ -17,32 +19,38 @@ interface UserProfile {
   r_cash_balance?: number;
 }
 interface OrderItem { id: string; name: string; price: number; unit: string; quantity: number; }
-interface Order { 
-  id: string; total_amount: number; status: string; created_at: string; order_items: OrderItem[]; payment_method?: string; 
+interface Order {
+  id: string; total_amount: number; status: string; created_at: string; order_items: OrderItem[]; payment_method?: string;
   freight_charges?: number; toll_charges?: number; loading_charges?: number; packaging_charges?: number; gateway_charges?: number; other_charges?: number;
 }
+
 
 export default function ClientPortal() {
   const router = useRouter()
   const { addToCart } = useCart()
 
+
   const [profile, setProfile] = useState<UserProfile | null>(null)
   const [orders, setOrders] = useState<Order[]>([])
-  const [isLoading, setIsLoading] = useState(true) 
-  
+  const [isLoading, setIsLoading] = useState(true)
+ 
   const [activeTab, setActiveTab] = useState<'profile' | 'orders' | 'billing' | 'quotes'>('profile')
 
+
   const [showWalletModal, setShowWalletModal] = useState(false)
-  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null) 
-  
+  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null)
+ 
   const [walletAmount, setWalletAmount] = useState('')
   const [utrNumber, setUtrNumber] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
 
+
   const [isEditingProfile, setIsEditingProfile] = useState(false)
   const [profileForm, setProfileForm] = useState<Partial<UserProfile>>({})
 
+
   const pendingQuotesCount = orders.filter(o => o.status === 'Pending Approval' || o.status === 'Awaiting Payment').length
+
 
   useEffect(() => {
     let isMounted = true
@@ -50,11 +58,13 @@ export default function ClientPortal() {
       const { data: { session } } = await supabase.auth.getSession()
       if (!session) { window.location.replace('/auth'); return }
 
+
       const { data: roleData } = await supabase.from('user_roles').select('*').eq('id', session.user.id).single()
       if (roleData) {
         if (roleData.role === 'admin') { window.location.replace('/admin'); return }
         if (isMounted) { setProfile(roleData as UserProfile); setProfileForm(roleData) }
       }
+
 
       const { data: orderData } = await supabase.from('orders').select('*').eq('user_id', session.user.id).order('created_at', { ascending: false })
       if (isMounted) {
@@ -66,15 +76,17 @@ export default function ClientPortal() {
     return () => { isMounted = false }
   }, [])
 
+
   const handleWalletRequest = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!profile) return
     setIsSubmitting(true)
     const { error } = await supabase.from('wallet_requests').insert([{ user_id: profile.id, customer_name: profile.company_name || profile.email, amount: Number(walletAmount), utr_number: utrNumber, status: 'Pending' }])
-    if (!error) { toast.success("Payment Reference Submitted!"); setShowWalletModal(false); setWalletAmount(''); setUtrNumber('') } 
+    if (!error) { toast.success("Payment Reference Submitted!"); setShowWalletModal(false); setWalletAmount(''); setUtrNumber('') }
     else { toast.error("Error: " + error.message) }
     setIsSubmitting(false)
   }
+
 
   const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -82,20 +94,22 @@ export default function ClientPortal() {
     setIsSubmitting(true)
     const payload = { full_name: profileForm.full_name || '', company_name: profileForm.company_name || null, gst_number: profileForm.gst_number || '', phone_number: profileForm.phone_number || '', organization_role: profileForm.organization_role || '', billing_address: profileForm.billing_address || '', shipping_address: profileForm.shipping_address || '' }
     const { error } = await supabase.from('user_roles').update(payload).eq('id', profile.id)
-    if (!error) { toast.success("Profile updated successfully!"); setProfile({ ...profile, ...payload } as UserProfile); setIsEditingProfile(false) } 
+    if (!error) { toast.success("Profile updated successfully!"); setProfile({ ...profile, ...payload } as UserProfile); setIsEditingProfile(false) }
     else { toast.error("Failed to update profile: " + error.message) }
     setIsSubmitting(false)
   }
 
+
   const handlePayQuote = async (order: Order) => {
     if (!profile) return
     if (profile.wallet_balance < order.total_amount) { toast.error(`Insufficient Ledger Balance. Need ₹${order.total_amount.toLocaleString()}.`, { duration: 5000 }); return }
-    
+   
     setIsSubmitting(true)
     const newBalance = profile.wallet_balance - order.total_amount
     await supabase.from('user_roles').update({ wallet_balance: newBalance }).eq('id', profile.id)
-    
+   
     const { error } = await supabase.from('orders').update({ status: 'Processing (Milling)', payment_status: 'Paid', payment_method: 'B2B Ledger Wallet' }).eq('id', order.id)
+
 
     if (!error) {
       toast.success('Quote Accepted & Paid Successfully!')
@@ -105,15 +119,17 @@ export default function ClientPortal() {
     setIsSubmitting(false)
   }
 
+
   const handleSmartReorder = () => {
     if (orders.length === 0 || !orders[0].order_items) return
     orders[0].order_items.forEach((item: OrderItem) => { addToCart({ id: item.id, name: item.name, price: item.price, unit: item.unit, quantity: item.quantity }) })
     toast.success("Past order added to cart!")
-    router.push('/') 
+    router.push('/')
   }
 
+
   const handleLogout = async () => { toast('Logging out...', { icon: '👋' }); await supabase.auth.signOut(); window.location.replace('/auth') }
-  
+ 
   const getStatusIcon = (status: string) => {
     switch (status) {
       case 'Delivered': return <CheckCircle2 size={20} className="text-emerald-500" />
@@ -123,9 +139,11 @@ export default function ClientPortal() {
     }
   }
 
+
   if (isLoading) return <div className="min-h-screen flex items-center justify-center bg-slate-50"><Loader2 size={48} className="animate-spin text-indigo-600" /></div>
   if (!profile) return null
   const isB2B = profile.client_type !== 'D2C'
+
 
   return (
     <div className="min-h-screen bg-slate-50 font-sans relative flex flex-col">
@@ -136,11 +154,13 @@ export default function ClientPortal() {
         </div>
       </nav>
 
+
       <main className="max-w-6xl mx-auto px-4 md:px-6 py-8 md:py-12 print:hidden flex-1 w-full">
         <div className="mb-8 flex flex-col md:flex-row md:items-end justify-between gap-4">
           <div><h1 className="text-2xl md:text-3xl font-bold text-slate-900 mb-2">{isB2B ? 'Partner Portal' : 'My Account'}</h1><p className="text-sm md:text-base text-slate-500">{isB2B ? `Manage your ${profile.client_type} orders, billing, and company details.` : 'Manage your recent orders and personal details.'}</p></div>
           {orders.length > 0 && orders[0].order_items && <button onClick={handleSmartReorder} className="w-full md:w-auto flex items-center justify-center gap-2 bg-slate-900 hover:bg-slate-800 text-white px-5 py-3 md:py-2.5 rounded-xl font-bold transition-all shadow-md active:scale-95"><RotateCcw size={18} /> 1-Click Reorder</button>}
         </div>
+
 
         <div className="flex flex-col md:flex-row gap-6 md:gap-8">
           <aside className="w-full md:w-64 shrink-0 flex md:flex-col gap-2 overflow-x-auto pb-2 md:pb-0 hide-scrollbar">
@@ -149,6 +169,7 @@ export default function ClientPortal() {
             <button onClick={() => setActiveTab('orders')} className={`whitespace-nowrap shrink-0 md:w-full flex items-center justify-between gap-3 px-4 py-3 rounded-xl transition-colors font-medium text-left ${activeTab === 'orders' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-600 bg-white md:bg-transparent hover:bg-slate-200/50'}`}><div className="flex items-center gap-3"><Package size={20} /> Order History</div></button>
             {isB2B && <button onClick={() => setActiveTab('billing')} className={`whitespace-nowrap shrink-0 md:w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-colors font-medium text-left ${activeTab === 'billing' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-600 bg-white md:bg-transparent hover:bg-slate-200/50'}`}><Receipt size={20} /> Invoices & Ledger</button>}
           </aside>
+
 
           <div className="flex-1">
             {activeTab === 'quotes' && isB2B && (
@@ -183,6 +204,7 @@ export default function ClientPortal() {
               </div>
             )}
 
+
             {activeTab === 'profile' && (
               <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-300">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
@@ -196,6 +218,7 @@ export default function ClientPortal() {
                     </div>
                   )}
 
+
                   <div className={`bg-linear-to-br from-amber-500 to-orange-600 p-6 md:p-8 rounded-2xl shadow-lg text-white flex flex-col justify-between gap-6 relative overflow-hidden ${!isB2B ? 'md:col-span-2' : ''}`}>
                     <div className="flex items-center gap-4 w-full relative z-10">
                       <div className="w-14 h-14 bg-white/20 rounded-full flex items-center justify-center backdrop-blur-sm shrink-0"><Sparkles size={28} className="text-amber-100" /></div>
@@ -204,6 +227,7 @@ export default function ClientPortal() {
                     <div className="w-full px-6 py-3.5 bg-white/20 border border-white/30 text-white font-bold rounded-xl text-center shadow-sm whitespace-nowrap relative z-10">1 R-Cash = ₹1 Off Next Order</div>
                   </div>
                 </div>
+
 
                 <div className="bg-white p-6 md:p-8 rounded-2xl shadow-sm border border-slate-200">
                   <div className="flex justify-between items-start mb-6">
@@ -237,6 +261,7 @@ export default function ClientPortal() {
               </div>
             )}
 
+
             {activeTab === 'orders' && (
               <div className="space-y-4">
                   {orders.filter(o => o.status !== 'Pending Approval' && o.status !== 'Awaiting Payment').length === 0 ? (
@@ -252,7 +277,7 @@ export default function ClientPortal() {
                   ))}
               </div>
             )}
-            
+           
             {activeTab === 'billing' && isB2B && (
               <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden animate-in fade-in slide-in-from-bottom-4 duration-300">
                 <div className="p-6 border-b border-slate-100 bg-slate-50"><h3 className="font-bold text-slate-900">B2B Order Ledger</h3><p className="text-sm text-slate-500 mt-1">Download official tax invoices for your accounting department.</p></div>
@@ -274,6 +299,7 @@ export default function ClientPortal() {
         </div>
       </main>
 
+
       <footer className="bg-slate-900 text-slate-400 py-12 px-6 mt-auto border-t border-slate-800 shrink-0 print:hidden">
         <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-12">
           <div className="space-y-4"><div className="flex items-center gap-2"><div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-white font-bold text-sm shadow-inner">R</div><span className="text-xl font-bold text-white tracking-tight">Raj Gharona</span></div><p className="text-sm leading-relaxed max-w-xs">Premium milling and fresh grains delivered directly to your home or B2B facility.</p><div className="inline-flex items-center gap-2 px-3 py-1.5 bg-slate-800 rounded-lg text-sm font-mono text-slate-300"><span className="font-bold text-white">FSSAI:</span> 100210XXXXXX00</div></div>
@@ -281,12 +307,14 @@ export default function ClientPortal() {
             <a href="tel:+917683975998" className="flex items-center gap-3 text-sm hover:text-white transition-colors"><Phone size={16} className="text-indigo-400" /> +91 76839 75998 (Mon-Sat)</a>
             <a href="mailto:support@rajgharona.com" className="flex items-center gap-3 text-sm hover:text-white transition-colors"><Mail size={16} className="text-indigo-400" /> support@rajgharona.com</a>
           </div></div>
-          <div className="space-y-4"><h4 className="text-white font-bold uppercase tracking-wider text-sm">Legal & Policies</h4><div className="flex flex-col space-y-3 text-sm"><Link href="#" className="hover:text-white transition-colors hover:underline">Terms & Conditions</Link><Link href="#" className="hover:text-white transition-colors hover:underline">Privacy Policy</Link><Link href="#" className="hover:text-white transition-colors hover:underline">Refund & Cancellation</Link><Link href="#" className="hover:text-white transition-colors hover:underline">Shipping Policy</Link></div></div>
+          <div className="space-y-4"><h4 className="text-white font-bold uppercase tracking-wider text-sm">Legal & Policies</h4><div className="flex flex-col space-y-3 text-sm"><Link href="/policies" className="hover:text-white transition-colors hover:underline">Terms & Conditions</Link><Link href="/policies" className="hover:text-white transition-colors hover:underline">Privacy Policy</Link><Link href="/policies" className="hover:text-white transition-colors hover:underline">Refund & Cancellation</Link><Link href="/policies" className="hover:text-white transition-colors hover:underline">Shipping Policy</Link></div></div>
         </div>
         <div className="max-w-7xl mx-auto mt-12 pt-8 border-t border-slate-800 text-sm text-center md:text-left flex flex-col md:flex-row justify-between items-center gap-4"><p>&copy; {new Date().getFullYear()} Raj Gharona. All rights reserved.</p><p className="text-slate-500">Secure Payments processed locally in India.</p></div>
       </footer>
 
+
       <a href="https://wa.me/917683975998" target="_blank" rel="noreferrer" className="fixed bottom-6 right-6 md:bottom-10 md:right-10 bg-[#25D366] text-white p-4 rounded-full shadow-2xl hover:scale-110 transition-transform z-50 flex items-center justify-center cursor-pointer hover:shadow-[#25D366]/30 print:hidden" title="Chat with us on WhatsApp"><MessageCircle size={32} fill="white" /></a>
+
 
       {/* --- MODAL: RELOAD WALLET --- */}
       {showWalletModal && (
@@ -305,15 +333,16 @@ export default function ClientPortal() {
         </div>
       )}
 
+
       {/* --- MODAL: INVOICE VIEWER & PRINT --- */}
       {selectedOrder && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 print:p-0">
           {/* Background overlay - hidden when printing */}
           <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-md print:hidden" onClick={() => setSelectedOrder(null)}></div>
-          
+         
           {/* Invoice Container */}
           <div className="relative bg-white rounded-3xl shadow-2xl w-full max-w-3xl overflow-hidden animate-in zoom-in-95 duration-200 print:shadow-none print:rounded-none print:w-full print:max-w-none">
-            
+           
             {/* Header / Actions - hidden when printing */}
             <div className="flex items-center justify-between p-6 border-b border-slate-100 bg-slate-50/50 print:hidden">
               <div className="flex items-center gap-3">
@@ -325,6 +354,7 @@ export default function ClientPortal() {
                 <button onClick={() => setSelectedOrder(null)} className="p-2.5 text-slate-400 hover:bg-white hover:text-rose-500 rounded-xl transition-all border border-transparent hover:border-slate-100"><X size={24}/></button>
               </div>
             </div>
+
 
             {/* Printable Content */}
             <div className="p-8 md:p-12 overflow-y-auto max-h-[80vh] print:max-h-none print:p-4">
@@ -348,6 +378,7 @@ export default function ClientPortal() {
                 </div>
               </div>
 
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-12 mb-12 border-y border-slate-100 py-8">
                 <div>
                   <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">Billed To</h4>
@@ -366,6 +397,7 @@ export default function ClientPortal() {
                 </div>
               </div>
 
+
               <table className="w-full mb-12">
                 <thead>
                   <tr className="border-b-2 border-slate-900"><th className="text-left py-4 text-sm font-bold text-slate-900 uppercase">Item Description</th><th className="text-center py-4 text-sm font-bold text-slate-900 uppercase">Qty</th><th className="text-right py-4 text-sm font-bold text-slate-900 uppercase">Rate</th><th className="text-right py-4 text-sm font-bold text-slate-900 uppercase">Amount</th></tr>
@@ -377,6 +409,7 @@ export default function ClientPortal() {
                 </tbody>
               </table>
 
+
               <div className="flex justify-end">
                 <div className="w-full md:w-64 space-y-3">
                   <div className="flex justify-between text-sm text-slate-500"><span>Subtotal:</span><span className="font-medium text-slate-900">₹{(selectedOrder.total_amount - (selectedOrder.freight_charges || 0) - (selectedOrder.toll_charges || 0) - (selectedOrder.loading_charges || 0) - (selectedOrder.packaging_charges || 0) - (selectedOrder.gateway_charges || 0) - (selectedOrder.other_charges || 0)).toLocaleString()}</span></div>
@@ -386,6 +419,7 @@ export default function ClientPortal() {
                 </div>
               </div>
 
+
               <div className="mt-24 pt-8 border-t border-slate-100 text-center"><p className="text-xs text-slate-400 italic">This is a computer-generated document and does not require a physical signature.</p></div>
             </div>
           </div>
@@ -394,3 +428,4 @@ export default function ClientPortal() {
     </div>
   )
 }
+

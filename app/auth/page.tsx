@@ -1,166 +1,181 @@
 'use client'
 
-import { useState, FormEvent } from 'react'
+import { useState } from 'react'
 import { supabase } from '../../lib/supabase'
-import { useRouter } from 'next/navigation'
-import { Lock, Mail, ShieldCheck, Loader2, Building2, User } from 'lucide-react'
-import Link from 'next/link'
+import { 
+  Store, ShieldCheck, Mail, Lock, User, 
+  Building2, Loader2, ArrowRight, CheckCircle2 
+} from 'lucide-react'
+import toast from 'react-hot-toast'
 
-export default function AuthHub() {
-  const router = useRouter()
-  const [isLogin, setIsLogin] = useState(true)
-  const [isLoading, setIsLoading] = useState(false)
-  const [status, setStatus] = useState<{ type: 'error' | 'success' | null; message: string }>({ type: null, message: '' })
-  
-  // New State for FMCG Logic
-  const [accountTier, setAccountTier] = useState<'D2C' | 'B2B'>('D2C')
-  const [formData, setFormData] = useState({ 
-    email: '', password: '', companyName: '', clientType: 'Wholesale' 
+export default function DualGateAuth() {
+  const [portalType, setPortalType] = useState<'customer' | 'staff'>('customer')
+  const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signIn')
+  const [isSubmitting, setIsSubmitting] = useState(false)
+
+  const [formData, setFormData] = useState({
+    email: '',
+    password: '',
+    fullName: '',
+    companyName: '',
+    clientType: 'D2C' // Default for signups
   })
 
-  const handleAuth = async (e: FormEvent<HTMLFormElement>) => {
+  const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault()
-    setIsLoading(true)
-    setStatus({ type: null, message: '' })
+    setIsSubmitting(true)
 
     try {
-      if (isLogin) {
-        // --- LOGIN FLOW ---
-        const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-          email: formData.email, password: formData.password,
+      if (authMode === 'signup' && portalType === 'customer') {
+        // 1. Sign Up Customer
+        const { data: authData, error: authError } = await supabase.auth.signUp({
+          email: formData.email,
+          password: formData.password,
         })
         if (authError) throw authError
 
-        const { data: roleData, error: roleError } = await supabase.from('user_roles').select('role, account_status').eq('id', authData.user.id).single()
-        if (roleError && roleError.code !== 'PGRST116') throw roleError
-
-        // Security Check: Lock out pending B2B accounts
-        if (roleData?.account_status === 'pending') {
-           await supabase.auth.signOut()
-           throw new Error('Your B2B account is pending administrator approval.')
+        if (authData.user) {
+          // Create their profile in user_roles
+          const { error: profileError } = await supabase.from('user_roles').insert([{
+            id: authData.user.id,
+            email: formData.email,
+            full_name: formData.fullName,
+            company_name: formData.companyName || null,
+            role: 'customer',
+            client_type: formData.clientType,
+            account_status: formData.clientType === 'D2C' ? 'active' : 'pending',
+            wallet_balance: 0,
+            credit_limit: 0
+          }])
+          if (profileError) throw profileError
+          
+          toast.success(formData.clientType === 'D2C' ? 'Account created! Logging in...' : 'B2B Account created! Pending Admin KYC.')
+          // Auto sign-in
+          await loginUser()
         }
-
-        setStatus({ type: 'success', message: 'Authenticating...' })
-        const userRole = roleData?.role || 'customer'
-        router.push(userRole === 'admin' || userRole === 'sales' ? '/admin' : '/')
-
       } else {
-        // --- SIGNUP FLOW ---
-        const { data: signUpData, error } = await supabase.auth.signUp({
-          email: formData.email, password: formData.password,
-        })
-        if (error) throw error
-
-        // If B2B, immediately update the database with their flour industry details
-        if (signUpData.user && accountTier === 'B2B') {
-           await supabase.from('user_roles').update({
-             company_name: formData.companyName,
-             client_type: formData.clientType,
-             account_status: 'pending' // Locks them out until you approve
-           }).eq('id', signUpData.user.id)
-        }
-        
-        setStatus({ type: 'success', message: accountTier === 'B2B' ? 'Application submitted! Awaiting approval.' : 'Account created! Please log in.' })
-        setIsLogin(true)
+        // 2. Sign In (Both Staff & Customer)
+        await loginUser()
       }
-    } catch (error) {
-      if (error instanceof Error) setStatus({ type: 'error', message: error.message })
-    } finally {
-      setIsLoading(false)
+    } catch (error: any) {
+      toast.error(error.message)
+      setIsSubmitting(false)
+    }
+  }
+
+  const loginUser = async () => {
+    const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+      email: formData.email,
+      password: formData.password,
+    })
+    if (authError) throw authError
+
+    // Route dynamically based on role
+    if (authData.user) {
+      const { data: roleData } = await supabase.from('user_roles').select('role').eq('id', authData.user.id).single()
+      
+      if (!roleData) throw new Error("Profile not found.")
+
+      if (roleData.role === 'customer') {
+        if (portalType === 'staff') {
+          await supabase.auth.signOut()
+          throw new Error("You do not have staff access. Please use the Customer Portal.")
+        }
+        window.location.replace('/store')
+      } else {
+        if (portalType === 'customer') {
+           toast("Redirecting to Staff Workspace...", { icon: '🔄' })
+        }
+        // Staff goes to the MECE Gateway Portal
+        window.location.replace('/portal')
+      }
     }
   }
 
   return (
-    <main className="min-h-screen flex bg-white">
-      <div className="hidden lg:flex lg:w-1/2 bg-slate-900 flex-col justify-between p-12 relative overflow-hidden">
-        <div className="absolute top-0 left-0 w-full h-full bg-[radial-gradient(ellipse_at_top_left,var(--tw-gradient-stops))] from-indigo-900/40 via-slate-900 to-slate-900"></div>
-        <div className="relative z-10">
-          <div className="flex items-center gap-3 text-white mb-12">
-            <ShieldCheck size={32} className="text-indigo-400" />
-            <span className="text-2xl font-bold tracking-tight">Raj Gharona DB</span>
-          </div>
-          <h1 className="text-4xl md:text-5xl font-bold text-white leading-tight mb-6">
-            The secure gateway for <span className="text-indigo-400">FMCG Milling & Wholesale.</span>
-          </h1>
-          <p className="text-lg text-slate-400 max-w-md">Serving D2C homes, commercial Roti factories, and pan-India distributors.</p>
-        </div>
+    <div className="min-h-screen bg-slate-50 flex flex-col justify-center py-12 sm:px-6 lg:px-8 font-sans selection:bg-indigo-100 selection:text-indigo-900">
+      <div className="sm:mx-auto sm:w-full sm:max-w-md text-center">
+        <div className="w-16 h-16 bg-indigo-600 rounded-2xl mx-auto flex items-center justify-center text-white font-black text-3xl shadow-lg mb-6">R</div>
+        <h2 className="text-3xl font-black text-slate-900 tracking-tight">Raj Gharona</h2>
+        <p className="mt-2 text-sm text-slate-500 font-medium">Enterprise Unified Commerce Platform</p>
       </div>
 
-      <div className="w-full lg:w-1/2 flex flex-col justify-center items-center p-8 sm:p-12 overflow-y-auto">
-        <div className="w-full max-w-md">
-          <Link href="/" className="inline-flex items-center text-sm font-semibold text-slate-500 hover:text-slate-900 mb-8 transition-colors">&larr; Return to Storefront</Link>
+      <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md">
+        <div className="bg-white py-8 px-4 shadow-xl sm:rounded-3xl sm:px-10 border border-slate-100 relative overflow-hidden">
           
-          <div className="mb-8">
-            <h2 className="text-3xl font-bold text-slate-900 tracking-tight">{isLogin ? 'Welcome back' : 'Create an account'}</h2>
-            <p className="text-slate-500 mt-2">{isLogin ? 'Enter your credentials.' : 'Select your account type below.'}</p>
+          {/* Dual Gate Toggle */}
+          <div className="flex p-1 bg-slate-100 rounded-xl mb-8 relative z-10">
+            <button 
+              type="button"
+              onClick={() => { setPortalType('customer'); setAuthMode('signIn'); }} 
+              className={`flex-1 py-2.5 text-sm font-bold rounded-lg transition-all flex items-center justify-center gap-2 ${portalType === 'customer' ? 'bg-white shadow-sm text-indigo-700' : 'text-slate-500 hover:text-slate-700'}`}
+            >
+              <Store size={16}/> Customer
+            </button>
+            <button 
+              type="button"
+              onClick={() => { setPortalType('staff'); setAuthMode('signIn'); }} 
+              className={`flex-1 py-2.5 text-sm font-bold rounded-lg transition-all flex items-center justify-center gap-2 ${portalType === 'staff' ? 'bg-slate-900 shadow-sm text-white' : 'text-slate-500 hover:text-slate-700'}`}
+            >
+              <ShieldCheck size={16}/> Staff Portal
+            </button>
           </div>
 
-          {!isLogin && (
-            <div className="flex gap-4 mb-6">
-              <button onClick={() => setAccountTier('D2C')} className={`flex-1 py-3 px-4 rounded-xl border-2 flex items-center justify-center gap-2 font-semibold transition-all ${accountTier === 'D2C' ? 'border-indigo-600 bg-indigo-50 text-indigo-700' : 'border-slate-200 text-slate-500 hover:border-slate-300'}`}>
-                <User size={18} /> Consumer (D2C)
-              </button>
-              <button onClick={() => setAccountTier('B2B')} className={`flex-1 py-3 px-4 rounded-xl border-2 flex items-center justify-center gap-2 font-semibold transition-all ${accountTier === 'B2B' ? 'border-indigo-600 bg-indigo-50 text-indigo-700' : 'border-slate-200 text-slate-500 hover:border-slate-300'}`}>
-                <Building2 size={18} /> Business (B2B)
-              </button>
-            </div>
-          )}
+          <form className="space-y-5 relative z-10" onSubmit={handleAuth}>
+            {authMode === 'signup' && portalType === 'customer' && (
+              <div className="space-y-5 animate-in fade-in slide-in-from-bottom-4">
+                <div className="grid grid-cols-2 gap-3 bg-slate-50 p-1.5 rounded-xl border border-slate-200">
+                  <label className={`cursor-pointer text-center py-2 text-xs font-bold rounded-lg transition-colors ${formData.clientType === 'D2C' ? 'bg-white shadow-sm text-indigo-700' : 'text-slate-500 hover:bg-slate-100'}`}>
+                    <input type="radio" className="hidden" checked={formData.clientType === 'D2C'} onChange={() => setFormData({...formData, clientType: 'D2C'})}/> D2C Retail
+                  </label>
+                  <label className={`cursor-pointer text-center py-2 text-xs font-bold rounded-lg transition-colors ${formData.clientType !== 'D2C' ? 'bg-white shadow-sm text-indigo-700' : 'text-slate-500 hover:bg-slate-100'}`}>
+                    <input type="radio" className="hidden" checked={formData.clientType !== 'D2C'} onChange={() => setFormData({...formData, clientType: 'Distributor'})}/> B2B Partner
+                  </label>
+                </div>
 
-          <form onSubmit={handleAuth} className="space-y-4">
-            
-            {!isLogin && accountTier === 'B2B' && (
-              <div className="space-y-4 p-4 bg-slate-50 border border-slate-200 rounded-xl mb-4">
                 <div>
-                  <label className="block text-sm font-semibold text-slate-900 mb-1.5">Company / Factory Name</label>
-                  <input required type="text" value={formData.companyName} onChange={(e) => setFormData({...formData, companyName: e.target.value})} className="w-full px-4 py-2.5 bg-white border border-slate-300 rounded-lg outline-none" placeholder="e.g., Sharma Roti Udyog" />
+                  <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Full Name</label>
+                  <div className="relative"><div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><User size={16} className="text-slate-400" /></div><input required type="text" value={formData.fullName} onChange={e => setFormData({...formData, fullName: e.target.value})} className="block w-full pl-10 p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium outline-none focus:border-indigo-500 focus:bg-white transition-colors" placeholder="John Doe" /></div>
                 </div>
-                <div>
-                  <label className="block text-sm font-semibold text-slate-900 mb-1.5">Business Tier</label>
-                  <select value={formData.clientType} onChange={(e) => setFormData({...formData, clientType: e.target.value})} className="w-full px-4 py-2.5 bg-white border border-slate-300 rounded-lg outline-none">
-                    <option>Wholesale</option>
-                    <option>Distributor</option>
-                    <option>Roti Factory</option>
-                    <option>Retail (Modern)</option>
-                    <option>Retail (Old School)</option>
-                  </select>
-                </div>
+
+                {formData.clientType !== 'D2C' && (
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Company / Store Name</label>
+                    <div className="relative"><div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><Building2 size={16} className="text-slate-400" /></div><input required type="text" value={formData.companyName} onChange={e => setFormData({...formData, companyName: e.target.value})} className="block w-full pl-10 p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium outline-none focus:border-indigo-500 focus:bg-white transition-colors" placeholder="XYZ Traders" /></div>
+                  </div>
+                )}
               </div>
             )}
 
             <div>
-              <label className="block text-sm font-semibold text-slate-900 mb-1.5">Email</label>
-              <div className="relative">
-                <Mail className="absolute left-3.5 top-3 text-slate-400" size={18} />
-                <input required type="email" value={formData.email} onChange={(e) => setFormData({...formData, email: e.target.value})} className="w-full pl-10 pr-4 py-2.5 border border-slate-300 rounded-lg outline-none" placeholder="name@company.com" />
-              </div>
+              <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Email Address</label>
+              <div className="relative"><div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><Mail size={16} className="text-slate-400" /></div><input required type="email" value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} className="block w-full pl-10 p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium outline-none focus:border-indigo-500 focus:bg-white transition-colors" placeholder="you@example.com" /></div>
             </div>
 
             <div>
-              <label className="block text-sm font-semibold text-slate-900 mb-1.5">Password</label>
-              <div className="relative">
-                <Lock className="absolute left-3.5 top-3 text-slate-400" size={18} />
-                <input required type="password" value={formData.password} onChange={(e) => setFormData({...formData, password: e.target.value})} className="w-full pl-10 pr-4 py-2.5 border border-slate-300 rounded-lg outline-none" placeholder="••••••••" />
-              </div>
+              <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Password</label>
+              <div className="relative"><div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><Lock size={16} className="text-slate-400" /></div><input required type="password" value={formData.password} onChange={e => setFormData({...formData, password: e.target.value})} className="block w-full pl-10 p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium outline-none focus:border-indigo-500 focus:bg-white transition-colors" placeholder="••••••••" /></div>
             </div>
 
-            {status.type && (
-              <div className={`p-3 rounded-lg text-sm font-medium border ${status.type === 'error' ? 'bg-red-50 text-red-800 border-red-200' : 'bg-emerald-50 text-emerald-800 border-emerald-200'}`}>
-                {status.message}
-              </div>
-            )}
-
-            <button type="submit" disabled={isLoading} className="w-full flex justify-center gap-2 bg-slate-900 text-white font-medium py-3 rounded-lg mt-4">
-              {isLoading ? <Loader2 size={18} className="animate-spin" /> : isLogin ? 'Sign In' : 'Create Account'}
+            <button type="submit" disabled={isSubmitting} className={`w-full flex justify-center items-center gap-2 py-3.5 px-4 border border-transparent rounded-xl shadow-md text-sm font-bold text-white transition-all active:scale-95 ${portalType === 'staff' ? 'bg-slate-900 hover:bg-slate-800' : 'bg-indigo-600 hover:bg-indigo-700'}`}>
+              {isSubmitting ? <Loader2 size={18} className="animate-spin" /> : (authMode === 'signup' ? <CheckCircle2 size={18}/> : <ArrowRight size={18}/>)}
+              {authMode === 'signup' ? 'Create Account' : `Sign In to ${portalType === 'staff' ? 'Workspace' : 'Store'}`}
             </button>
           </form>
 
-          <div className="mt-8 text-center">
-            <button onClick={() => { setIsLogin(!isLogin); setStatus({ type: null, message: '' }); setFormData({ email: '', password: '', companyName: '', clientType: 'Wholesale' }) }} className="text-sm text-slate-600 hover:text-slate-900 font-medium">
-              {isLogin ? 'Don\'t have an account? Sign up' : 'Already have an account? Sign in'}
-            </button>
-          </div>
+          {portalType === 'customer' ? (
+            <div className="mt-6 text-center">
+              <button type="button" onClick={() => setAuthMode(authMode === 'signin' ? 'signup' : 'signin')} className="text-sm font-bold text-indigo-600 hover:text-indigo-500">
+                {authMode === 'signin' ? "New customer? Create an account" : "Already have an account? Sign in"}
+              </button>
+            </div>
+          ) : (
+            <div className="mt-8 pt-6 border-t border-slate-100 text-center">
+              <p className="text-xs text-slate-400 font-medium">Staff accounts are managed strictly by Administration. You cannot sign up for a workspace account here.</p>
+            </div>
+          )}
         </div>
       </div>
-    </main>
+    </div>
   )
 }

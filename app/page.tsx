@@ -1,15 +1,17 @@
-/* eslint-disable @next/next/no-img-element */
+		/* eslint-disable @next/next/no-img-element */
 'use client'
+
 
 import { useEffect, useState, useMemo } from 'react'
 import { supabase } from '../lib/supabase'
 import { useCart } from './context/CartContext'
 import Link from 'next/link'
-import { 
-  ShoppingCart, LogIn, UserCircle, X, Search, Loader2, 
-  Trash2, Menu, Phone, Mail, MessageCircle, ChevronLeft, ChevronRight 
+import {
+  ShoppingCart, LogIn, UserCircle, X, Search, Loader2,
+  Trash2, Menu, Phone, Mail, MessageCircle, ChevronLeft, ChevronRight
 } from 'lucide-react'
 import toast from 'react-hot-toast'
+
 
 interface Product {
   id: string; name: string; description: string; category: string; unit: string; stock_quantity: number;
@@ -17,11 +19,13 @@ interface Product {
   image_url?: string; image_urls?: string[];
 }
 
+
 interface RazorpaySuccessResponse {
   razorpay_payment_id: string;
   razorpay_order_id: string;
   razorpay_signature: string;
 }
+
 
 const loadRazorpay = () => {
   return new Promise((resolve) => {
@@ -33,25 +37,27 @@ const loadRazorpay = () => {
   })
 }
 
+
 export default function Storefront() {
   const { cartItems, addToCart, removeFromCart, updateQuantity, clearCart, cartCount, cartTotal } = useCart()
-  
+ 
   const [products, setProducts] = useState<Product[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [userRole, setUserRole] = useState<string | null>(null)
   const [clientType, setClientType] = useState<string>('D2C')
-  
+ 
   const [storeSettings, setStoreSettings] = useState({ reward_points_per_unit: 0.5, inr_per_reward_point: 1.0 })
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
   const [activeImageIndex, setActiveImageIndex] = useState(0)
-  
-  const [modalQuantity, setModalQuantity] = useState(1) 
-  const [isCartOpen, setIsCartOpen] = useState(false) 
-  const [isCheckingOut, setIsCheckingOut] = useState(false) 
+ 
+  const [modalQuantity, setModalQuantity] = useState(1)
+  const [isCartOpen, setIsCartOpen] = useState(false)
+  const [isCheckingOut, setIsCheckingOut] = useState(false)
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedCategory, setSelectedCategory] = useState('All')
   const [paymentMethod, setPaymentMethod] = useState<'online' | 'cod' | 'wallet'>('online')
+
 
   useEffect(() => {
     const initializeStore = async () => {
@@ -65,18 +71,21 @@ export default function Storefront() {
       }
       const { data: productData } = await supabase.from('products').select('*')
       if (productData) setProducts(productData as Product[])
-      
+     
       const { data: settingsData } = await supabase.from('store_settings').select('*').eq('id', 1).single()
       if (settingsData) setStoreSettings({ reward_points_per_unit: settingsData.reward_points_per_unit, inr_per_reward_point: settingsData.inr_per_reward_point })
+
 
       setIsLoading(false)
     }
     initializeStore()
   }, [])
 
+
   const categories = useMemo(() => {
     return ['All', ...Array.from(new Set(products.map(p => p.category)))]
   }, [products])
+
 
   const filteredProducts = useMemo(() => {
     return products.filter(product => {
@@ -86,6 +95,7 @@ export default function Storefront() {
     })
   }, [products, selectedCategory, searchQuery])
 
+
   const getDisplayPrice = (product: Product) => {
     switch (clientType) {
       case 'Wholesale': return product.price_b2b;
@@ -93,16 +103,18 @@ export default function Storefront() {
       case 'Roti Factory': return product.price_roti_factory;
       case 'Retail (Modern)': return product.price_retail_modern;
       case 'Retail (Old School)': return product.price_retail_old;
-      default: return product.price_d2c; 
+      default: return product.price_d2c;
     }
   }
+
 
   const handleAddToCart = () => {
     if (!selectedProduct) return
     addToCart({ id: selectedProduct.id, name: selectedProduct.name, price: getDisplayPrice(selectedProduct), unit: selectedProduct.unit, quantity: modalQuantity, image: selectedProduct.image_urls?.[0] || selectedProduct.image_url })
     toast.success(`${modalQuantity}x ${selectedProduct.name} added!`)
-    setSelectedProduct(null); setModalQuantity(1); setIsCartOpen(true) 
+    setSelectedProduct(null); setModalQuantity(1); setIsCartOpen(true)
   }
+
 
   const handleCheckout = async () => {
     if (cartItems.length === 0) return
@@ -110,13 +122,15 @@ export default function Storefront() {
     const { data: { session } } = await supabase.auth.getSession()
     if (!session) { setIsCartOpen(false); window.location.replace('/auth'); return }
 
+
     const { data: roleData } = await supabase.from('user_roles').select('*').eq('id', session.user.id).single()
     const finalCustomerName = roleData?.company_name || roleData?.full_name || session.user.email
 
+
     const finalizeOrderInDb = async (method: string, pStatus: string, oStatus: string) => {
       const { error } = await supabase.from('orders').insert([{
-        user_id: session.user.id, customer_name: finalCustomerName, total_amount: cartTotal, 
-        status: oStatus, payment_status: pStatus, payment_method: method, order_items: cartItems 
+        user_id: session.user.id, customer_name: finalCustomerName, total_amount: cartTotal,
+        status: oStatus, payment_status: pStatus, payment_method: method, order_items: cartItems
       }])
       if (!error) {
         const totalUnits = cartItems.reduce((sum, item) => sum + item.quantity, 0)
@@ -127,6 +141,7 @@ export default function Storefront() {
       } else { toast.error(error.message); setIsCheckingOut(false) }
     }
 
+
     if (clientType !== 'D2C') {
       const orderItemsText = cartItems.map(item => `- ${item.quantity}${item.unit} x ${item.name}`).join('\n')
       const waMessage = `Hello Raj Gharona Admin! 🌾\n\nI've submitted a B2B Request:\n*Business:* ${finalCustomerName}\n*Items:*\n${orderItemsText}\n*Value:* ₹${cartTotal.toLocaleString()}`;
@@ -135,32 +150,36 @@ export default function Storefront() {
       return
     }
 
+
     if (paymentMethod === 'wallet') {
       if ((roleData?.wallet_balance || 0) < cartTotal) { toast.error("Insufficient Wallet Balance"); setIsCheckingOut(false); return }
       await supabase.from('user_roles').update({ wallet_balance: roleData!.wallet_balance - cartTotal }).eq('id', session.user.id)
       await finalizeOrderInDb('App Wallet', 'Paid', 'New Order'); return
     }
 
+
     if (paymentMethod === 'cod') { await finalizeOrderInDb('Cash on Delivery', 'Unpaid', 'New Order'); return }
+
 
     if (paymentMethod === 'online') {
       const res = await loadRazorpay()
       if (!res) { toast.error("Razorpay Error"); setIsCheckingOut(false); return }
       const options = {
-        key: 'rzp_test_YOUR_KEY_HERE', 
-        amount: cartTotal * 100, 
-        currency: 'INR', 
-        name: 'Raj Gharona', 
-        handler: async (response: RazorpaySuccessResponse) => { 
-          await finalizeOrderInDb(`Razorpay (${response.razorpay_payment_id})`, 'Paid', 'New Order') 
+        key: 'rzp_test_YOUR_KEY_HERE',
+        amount: cartTotal * 100,
+        currency: 'INR',
+        name: 'Raj Gharona',
+        handler: async (response: RazorpaySuccessResponse) => {
+          await finalizeOrderInDb(`Razorpay (${response.razorpay_payment_id})`, 'Paid', 'New Order')
         },
-        prefill: { name: finalCustomerName, email: session.user.email }, 
-        theme: { color: '#4f46e5' } 
+        prefill: { name: finalCustomerName, email: session.user.email },
+        theme: { color: '#4f46e5' }
       }
-      const rzp = new (window as any).Razorpay(options); 
+      const rzp = new (window as any).Razorpay(options);
       rzp.open()
     }
   }
+
 
   return (
     <div className="min-h-screen bg-slate-50 font-sans overflow-x-hidden flex flex-col relative text-slate-900">
@@ -197,6 +216,7 @@ export default function Storefront() {
         </div>
       </nav>
 
+
       {isMobileMenuOpen && (
         <div className="fixed inset-0 z-50 flex justify-start md:hidden">
           <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={() => setIsMobileMenuOpen(false)}></div>
@@ -210,14 +230,16 @@ export default function Storefront() {
         </div>
       )}
 
+
       <header className="bg-slate-900 text-white py-12 px-6 shrink-0">
         <div className="max-w-7xl mx-auto"><h1 className="text-3xl md:text-5xl font-bold mb-4 tracking-tight text-white">Premium Milling & Grains</h1><p className="text-slate-300 max-w-2xl">{clientType === 'D2C' ? "Freshly milled and delivered to your doorstep." : `B2B Portal: ${clientType} volume pricing active.`}</p></div>
       </header>
 
+
       <main className="max-w-7xl mx-auto px-6 py-12 flex-1 w-full">
         {!isLoading && products.length > 0 && <div className="flex gap-3 overflow-x-auto pb-6 hide-scrollbar">{categories.map(category => <button key={category} onClick={() => setSelectedCategory(category)} className={`whitespace-nowrap px-5 py-2.5 rounded-full text-sm font-bold transition-all ${selectedCategory === category ? 'bg-indigo-600 text-white' : 'bg-white text-slate-700 border border-slate-200'}`}>{category}</button>)}</div>}
-        
-        {isLoading ? <div className="py-24 flex justify-center"><Loader2 size={48} className="animate-spin text-indigo-600" /></div> : filteredProducts.length === 0 ? <div className="text-center py-24 text-slate-600">No products found.</div> : 
+       
+        {isLoading ? <div className="py-24 flex justify-center"><Loader2 size={48} className="animate-spin text-indigo-600" /></div> : filteredProducts.length === 0 ? <div className="text-center py-24 text-slate-600">No products found.</div> :
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 animate-in fade-in duration-500">
             {filteredProducts.map((p) => (
               <div key={p.id} onClick={() => { setSelectedProduct(p); setActiveImageIndex(0); setModalQuantity(1); }} className="bg-white border border-slate-200 rounded-2xl p-5 hover:shadow-xl transition-all cursor-pointer group flex flex-col h-full">
@@ -232,9 +254,12 @@ export default function Storefront() {
         }
       </main>
 
-      <footer className="bg-slate-900 text-slate-400 py-12 px-6 border-t border-slate-800"><div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-12"><div><div className="flex items-center gap-2 mb-4 font-bold text-white">Raj Gharona</div><p className="text-sm text-slate-300">Premium milling directly to your facility.</p><div className="mt-4 inline-block px-3 py-1 bg-slate-800 rounded text-xs font-mono text-slate-200">FSSAI: 100210XXXXXX00</div></div><div><h4 className="text-white font-bold uppercase text-xs mb-4">Support</h4><div className="space-y-3 text-sm"><a href="tel:+917683975998" className="flex items-center gap-3 text-slate-300"><Phone size={16}/> +91 76839 75998</a><a href="mailto:support@rajgharona.com" className="flex items-center gap-3 text-slate-300"><Mail size={16}/> support@rajgharona.com</a></div></div><div><h4 className="text-white font-bold uppercase text-xs mb-4">Legal</h4><div className="flex flex-col space-y-3 text-sm"><Link href="#" className="text-slate-300">Terms</Link><Link href="#" className="text-slate-300">Privacy</Link><Link href="#" className="text-slate-300">Refunds</Link></div></div></div></footer>
+
+      <footer className="bg-slate-900 text-slate-400 py-12 px-6 border-t border-slate-800"><div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-12"><div><div className="flex items-center gap-2 mb-4 font-bold text-white">Raj Gharona</div><p className="text-sm text-slate-300">Premium milling directly to your facility.</p><div className="mt-4 inline-block px-3 py-1 bg-slate-800 rounded text-xs font-mono text-slate-200">FSSAI: 100210XXXXXX00</div></div><div><h4 className="text-white font-bold uppercase text-xs mb-4">Support</h4><div className="space-y-3 text-sm"><a href="tel:+917683975998" className="flex items-center gap-3 text-slate-300"><Phone size={16}/> +91 76839 75998</a><a href="mailto:support@rajgharona.com" className="flex items-center gap-3 text-slate-300"><Mail size={16}/> support@rajgharona.com</a></div></div><div><h4 className="text-white font-bold uppercase text-xs mb-4">Legal</h4><div className="flex flex-col space-y-3 text-sm"><Link href="/policies" className="text-slate-300">Terms</Link><Link href="/policies" className="text-slate-300">Privacy</Link><Link href="/policies" className="text-slate-300">Refunds</Link></div></div></div></footer>
+
 
       <a href="https://wa.me/917683975998" target="_blank" rel="noreferrer" className="fixed bottom-6 right-6 bg-[#25D366] text-white p-4 rounded-full shadow-2xl z-50"><MessageCircle size={32} fill="white" /></a>
+
 
       {selectedProduct && (
         <div className="fixed inset-0 z-70 flex items-center justify-center p-4">
@@ -284,6 +309,7 @@ export default function Storefront() {
         </div>
       )}
 
+
       {isCartOpen && (
         <div className="fixed inset-0 z-70 flex justify-end">
           <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setIsCartOpen(false)}></div>
@@ -319,3 +345,4 @@ export default function Storefront() {
     </div>
   )
 }
+

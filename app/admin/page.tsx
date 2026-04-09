@@ -1,532 +1,516 @@
-/* eslint-disable @next/next/no-img-element */
 'use client'
 
-import { useEffect, useState, FormEvent, useCallback, useMemo } from 'react'
+import { useEffect, useState, FormEvent, useCallback } from 'react'
 import { supabase } from '../../lib/supabase'
 import { 
-  PackagePlus, LayoutDashboard, Users, LogOut, ShieldAlert, 
-  Loader2, Building2, ShoppingBag, ArrowRight, 
-  Check, X, AlertTriangle, Edit, Trash2, ReceiptText, Banknote, 
-  TrendingUp, Activity, UploadCloud, Menu, Save, ClipboardList, 
-  Calculator, Settings, MessageCircle, Printer, Download, FileSpreadsheet, Search, CheckSquare, Image as ImageIcon
+  ShieldCheck, Activity, GitPullRequest, History, Users, 
+  Settings, AlertOctagon, ArrowRight, CheckCircle2, 
+  AlertTriangle, Eye, ShieldAlert, LogOut, Menu, X, 
+  Loader2, Search, UserPlus, Key, Edit3, Save, 
+  Sparkles, Gift, ChevronDown, ChevronUp, Banknote
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 
-interface Client { 
-  id: string; company_name: string; client_type: string; email: string; account_status: string; created_at: string; 
-  full_name?: string; gst_number?: string; phone_number?: string; organization_role?: string; billing_address?: string; shipping_address?: string;
-  credit_limit: number; payment_terms: string; special_instructions?: string; wallet_balance: number; r_cash_balance: number;
-}
+// --- Interfaces ---
+type AccessLevel = 'none' | 'read' | 'write'
+interface ModuleAccess { _master: AccessLevel; [subTab: string]: AccessLevel; }
+interface AccessMatrix { [module: string]: ModuleAccess; }
+interface UserRole { id: string; full_name: string; email: string; role: string; account_status: string; employee_number?: string; client_type?: string; company_name?: string; wallet_balance?: number; access_levels?: AccessMatrix; temporary_access?: Record<string, string> | null; }
 interface OrderItem { id: string; name: string; price: number; unit: string; quantity: number; }
-interface Order { 
-  id: string; user_id: string; customer_name: string; total_amount: number; status: string; created_at: string; order_items: OrderItem[]; payment_method?: string; payment_terms?: string;
-  freight_charges?: number; toll_charges?: number; loading_charges?: number; packaging_charges?: number; gateway_charges?: number; other_charges?: number;
+interface Order { id: string; customer_name: string; total_amount: number; status: string; created_at: string; order_items: OrderItem[]; is_price_deviated?: boolean; }
+interface WalletRequest { id: string; customer_name: string; amount: number; status: string; created_at: string; }
+interface ActivityLog { id: string; agent_id: string; action_type: string; description: string; created_at: string; user_roles: { full_name: string; role: string; }; }
+
+// --- Sub-Module Definitions for MECE Matrix ---
+const systemModules = [
+  { id: 'sales', label: 'Field Sales Ops', tabs: [{id: 'beat', label: 'Beat Route & Navigation'}, {id: 'punch_order', label: 'Punch Order & Pricing'}, {id: 'crm', label: 'Customer Directory & Ledgers'}, {id: 'pipeline', label: 'Outlet Onboarding (Leads)'}, {id: 'payments', label: 'Log Field Collections'}] },
+  { id: 'finance', label: 'Finance & Accounts', tabs: [{id: 'b2b_orders', label: 'B2B Quotes & Approvals'}, {id: 'finance', label: 'Ledger Verification'}, {id: 'pricing', label: 'DPMIE Margin Engine'}, {id: 'approvals', label: 'KYC Activations'}] },
+  { id: 'inventory', label: 'Warehouse & Catalog', tabs: [{id: 'inventory', label: 'Live Stock Visibility'}, {id: 'add', label: 'Add/Edit Catalog Items'}] },
+  { id: 'dispatch', label: 'Dispatch & Routing', tabs: [{id: 'orders', label: 'Processing Pipeline'}, {id: 'fleet', label: 'Fleet Manifest Assignment'}] },
+  { id: 'delivery', label: 'Delivery Fleet App', tabs: [{id: 'manifest', label: 'Active Route Manifest'}, {id: 'history', label: 'Completed Deliveries Log'}] }
+]
+
+const createDefaultMatrix = (): AccessMatrix => {
+  const defaultAcc: AccessMatrix = {};
+  systemModules.forEach(mod => {
+    defaultAcc[mod.id] = { _master: 'none' };
+    mod.tabs.forEach(tab => defaultAcc[mod.id][tab.id] = 'none');
+  });
+  return defaultAcc;
 }
-interface Product { id: string; name: string; description: string; category: string; unit: string; stock_quantity: number; price_d2c: number; price_b2b: number; price_distributor: number; price_roti_factory: number; price_retail_modern: number; price_retail_old: number; image_url?: string; image_urls?: string[]; }
-interface WalletRequest { id: string; user_id: string; customer_name: string; amount: number; utr_number: string; status: string; created_at: string; }
 
-const isOverdue = (dateString: string) => (new Date().getTime() - new Date(dateString).getTime()) > (24 * 60 * 60 * 1000)
-
-export default function AdminDashboard() {
-  const [isAuthorized, setIsAuthorized] = useState(false)
+export default function SuperAdminCommandCenter() {
   const [isLoadingAuth, setIsLoadingAuth] = useState(true)
-  const [activeView, setActiveView] = useState<'orders' | 'inventory' | 'add' | 'approvals' | 'directory' | 'finance' | 'b2b_orders' | 'settings'>('orders')
+  const [isAuthorized, setIsAuthorized] = useState(false)
+  const [adminProfile, setAdminProfile] = useState<UserRole | null>(null)
+  
+  const [activeView, setActiveView] = useState<'overview' | 'pipeline' | 'audit' | 'team' | 'settings'>('overview')
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
+  const [isSubmitting, setIsSubmitting] = useState(false)
 
   const [orders, setOrders] = useState<Order[]>([])
-  const [products, setProducts] = useState<Product[]>([])
-  const [pendingClients, setPendingClients] = useState<Client[]>([])
-  const [activeB2BClients, setActiveB2BClients] = useState<Client[]>([])
-  const [walletRequests, setWalletRequests] = useState<WalletRequest[]>([]) 
-  const [overdueCount, setOverdueCount] = useState(0)
+  const [walletRequests, setWalletRequests] = useState<WalletRequest[]>([])
+  const [activities, setActivities] = useState<ActivityLog[]>([])
+  const [allUsers, setAllUsers] = useState<UserRole[]>([])
   const [storeSettings, setStoreSettings] = useState({ reward_points_per_unit: 0.5, inr_per_reward_point: 1.0 })
-
-  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null) 
-  const [selectedClient, setSelectedClient] = useState<Client | null>(null) 
-  const [negotiatingOrder, setNegotiatingOrder] = useState<Order | null>(null)
-  const [negoForm, setNegoForm] = useState({ freight: 0, toll: 0, loading: 0, packaging: 0, gateway: 0, other: 0, payment_terms: '100% Advance' })
-
-  const [isSaving, setIsSaving] = useState(false)
-  const [editId, setEditId] = useState<string | null>(null)
   
-  const [addMode, setAddMode] = useState<'single' | 'csv'>('single')
-  const [imageFiles, setImageFiles] = useState<File[]>([])
-  const [imagePreviews, setImagePreviews] = useState<string[]>([])
-  const [existingImageUrls, setExistingImageUrls] = useState<string[]>([])
-  const [formData, setFormData] = useState({ name: '', description: '', category: 'Retail Flour', unit: 'kg', stock_quantity: '100', price_d2c: '', price_wholesale: '', price_distributor: '', price_roti_factory: '', price_retail_modern: '', price_retail_old: '' })
+  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null)
+  const [roleAssignUserId, setRoleAssignUserId] = useState('')
+  const [roleAssignRole, setRoleAssignRole] = useState('sales')
+  
+  // --- Permissions State ---
+  const [matrixUser, setMatrixUser] = useState<UserRole | null>(null)
+  const [matrixState, setMatrixState] = useState<AccessMatrix>(createDefaultMatrix())
+  const [accessModalUser, setAccessModalUser] = useState<UserRole | null>(null)
+  const [expandedModule, setExpandedModule] = useState<string | null>(null)
 
-  const [inventorySearch, setInventorySearch] = useState('')
-  const [inventoryCategory, setInventoryCategory] = useState('All')
-  const [selectedProductIds, setSelectedProductIds] = useState<string[]>([])
-  const [showBulkEditModal, setShowBulkEditModal] = useState(false)
-  const [bulkEditField, setBulkEditField] = useState<string>('category')
-  const [bulkEditValue, setBulkEditValue] = useState('')
+  const fetchCommandData = useCallback(async () => {
+    const { data: orderData } = await supabase.from('orders').select('*').order('created_at', { ascending: false })
+    if (orderData) setOrders(orderData as Order[])
+    
+    const { data: walletData } = await supabase.from('wallet_requests').select('*').eq('status', 'Pending')
+    if (walletData) setWalletRequests(walletData as WalletRequest[])
+    
+    const { data: usersData } = await supabase.from('user_roles').select('*')
+    if (usersData) setAllUsers(usersData as UserRole[])
+    
+    const { data: logData } = await supabase.from('agent_activities').select('id, agent_id, action_type, description, created_at, user_roles!inner(full_name, role)').order('created_at', { ascending: false }).limit(100)
+    if (logData) setActivities(logData as unknown as ActivityLog[])
 
-  const totalRevenue = orders.reduce((sum, order) => sum + (Number(order.total_amount) || 0), 0)
-  const pendingWalletTotal = walletRequests.reduce((sum, req) => sum + (Number(req.amount) || 0), 0)
-  const activeB2BCount = activeB2BClients.length
-  const pendingB2BOrdersCount = orders.filter(o => o.status === 'Pending Approval').length
-
-  const fetchOrders = useCallback(async () => { const { data } = await supabase.from('orders').select('*').order('created_at', { ascending: false }); if (data) setOrders(data as Order[]) }, [])
-  const fetchProducts = useCallback(async () => { const { data } = await supabase.from('products').select('*').order('name', { ascending: true }); if (data) setProducts(data as Product[]) }, [])
-  const fetchClients = useCallback(async () => {
-    const { data } = await supabase.from('user_roles').select('*').neq('role', 'admin')
-    if (data) {
-      setActiveB2BClients(data.filter(c => c.account_status === 'active' && c.client_type !== 'D2C') as Client[])
-      const pending = data.filter(c => c.account_status === 'pending') as Client[]
-      setPendingClients(pending); setOverdueCount(pending.filter(c => isOverdue(c.created_at)).length)
-    }
+    const { data: settingsData } = await supabase.from('store_settings').select('*').eq('id', 1).single()
+    if (settingsData) setStoreSettings({ reward_points_per_unit: settingsData.reward_points_per_unit, inr_per_reward_point: settingsData.inr_per_reward_point })
   }, [])
-  const fetchWalletRequests = useCallback(async () => { const { data } = await supabase.from('wallet_requests').select('*').eq('status', 'Pending').order('created_at', { ascending: false }); if (data) setWalletRequests(data as WalletRequest[]) }, [])
-  const fetchSettings = useCallback(async () => { const { data } = await supabase.from('store_settings').select('*').eq('id', 1).single(); if (data) setStoreSettings({ reward_points_per_unit: data.reward_points_per_unit, inr_per_reward_point: data.inr_per_reward_point }) }, [])
 
   useEffect(() => {
     let isMounted = true
-    const initializeAdmin = async () => {
+    const initAdmin = async () => {
       const { data: { session } } = await supabase.auth.getSession()
       if (!session) return window.location.replace('/auth')
-      const { data: roleData } = await supabase.from('user_roles').select('role').eq('id', session.user.id).single()
-      if (roleData?.role === 'admin' || roleData?.role === 'sales') {
-        if (isMounted) setIsAuthorized(true)
-        fetchOrders(); fetchClients(); fetchProducts(); fetchWalletRequests(); fetchSettings()
-      } else { window.location.replace('/') }
+      const { data: roleData } = await supabase.from('user_roles').select('*').eq('id', session.user.id).single()
+      
+      if (roleData?.role === 'admin') {
+        if (isMounted) { setIsAuthorized(true); setAdminProfile(roleData as UserRole); fetchCommandData() }
+      } else { window.location.replace('/portal') }
+      
       if (isMounted) setIsLoadingAuth(false)
     }
-    initializeAdmin()
+    initAdmin()
     return () => { isMounted = false }
-  }, [fetchOrders, fetchClients, fetchProducts, fetchWalletRequests, fetchSettings])
+  }, [fetchCommandData])
 
-  const inventoryCategories = useMemo(() => { return ['All', ...Array.from(new Set(products.map(p => p.category)))] }, [products])
-  const filteredInventory = useMemo(() => {
-    return products.filter(p => {
-      const matchCat = inventoryCategory === 'All' || p.category === inventoryCategory
-      const matchSearch = p.name.toLowerCase().includes(inventorySearch.toLowerCase()) || p.category.toLowerCase().includes(inventorySearch.toLowerCase())
-      return matchCat && matchSearch
-    })
-  }, [products, inventoryCategory, inventorySearch])
-
-  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files) {
-      const files = Array.from(e.target.files)
-      setImageFiles(prev => [...prev, ...files])
-      const newPreviews = files.map(file => URL.createObjectURL(file))
-      setImagePreviews(prev => [...prev, ...newPreviews])
+  const handleForceAdvance = async (id: string, currentStatus: string) => {
+    if(!window.confirm("WARNING: You are overriding standard operational workflows. Proceed?")) return;
+    setIsSubmitting(true)
+    const pipeline = ['New Order', 'Pending Approval', 'Awaiting Payment', 'Processing (Milling)', 'Dispatched', 'Delivered']
+    const currentIndex = pipeline.indexOf(currentStatus)
+    if (currentIndex < pipeline.length - 1) {
+      const nextStatus = pipeline[currentIndex + 1]
+      const { error } = await supabase.from('orders').update({ status: nextStatus }).eq('id', id)
+      if (adminProfile) await supabase.from('agent_activities').insert([{ agent_id: adminProfile.id, action_type: 'Executive Override', description: `Admin forced order #${id.split('-')[0]} from ${currentStatus} to ${nextStatus}` }])
+      if (!error) { toast.success(`Forced to: ${nextStatus}`); setSelectedOrder(null); fetchCommandData() } else { toast.error(error.message) }
     }
+    setIsSubmitting(false)
   }
 
-  const removeNewImage = (index: number) => {
-    setImageFiles(prev => prev.filter((_, i) => i !== index))
-    setImagePreviews(prev => prev.filter((_, i) => i !== index))
+  const handleAssignRole = async (e: FormEvent) => {
+    e.preventDefault(); if (!roleAssignUserId) return toast.error("Select a user."); setIsSubmitting(true);
+    const { error } = await supabase.from('user_roles').update({ role: roleAssignRole }).eq('id', roleAssignUserId);
+    if (!error) { toast.success("Staff Role Assigned successfully!"); fetchCommandData(); setRoleAssignUserId(''); } else { toast.error(error.message); }
+    setIsSubmitting(false);
   }
 
-  const removeExistingImage = (url: string) => { setExistingImageUrls(prev => prev.filter(u => u !== url)) }
-
-  const handleEditClick = (product: Product) => {
-    setEditId(product.id)
-    setFormData({ name: product.name, description: product.description, category: product.category, unit: product.unit, stock_quantity: product.stock_quantity.toString(), price_d2c: product.price_d2c.toString(), price_wholesale: product.price_b2b.toString(), price_distributor: product.price_distributor.toString(), price_roti_factory: product.price_roti_factory.toString(), price_retail_modern: product.price_retail_modern.toString(), price_retail_old: product.price_retail_old.toString() })
-    setExistingImageUrls(product.image_urls || (product.image_url ? [product.image_url] : []))
-    setImageFiles([]); setImagePreviews([])
-    setActiveView('add'); setAddMode('single'); setIsMobileMenuOpen(false) 
-  }
-
-  const handleAddProduct = async (e: FormEvent<HTMLFormElement>) => {
-    e.preventDefault(); setIsSaving(true)
-    const uploadedUrls: string[] = [...existingImageUrls]
-    if (imageFiles.length > 0) {
-      toast(`Uploading images...`, { icon: '📸' })
-      for (const file of imageFiles) {
-        const fileExt = file.name.split('.').pop()
-        const fileName = `${Math.random().toString(36).substring(2, 15)}.${fileExt}`
-        const { error: uploadError } = await supabase.storage.from('product-images').upload(fileName, file)
-        if (!uploadError) {
-          const { data: { publicUrl } } = supabase.storage.from('product-images').getPublicUrl(fileName)
-          uploadedUrls.push(publicUrl)
+  const openPermissionMatrix = (user: UserRole) => {
+    setMatrixUser(user);
+    const currentAccess = user.access_levels || {};
+    const newAccess = createDefaultMatrix();
+    Object.keys(newAccess).forEach(mod => {
+      const legacyVal = (currentAccess as Record<string, unknown>)[mod];
+      if (legacyVal) {
+        if (typeof legacyVal === 'string') {
+          newAccess[mod]._master = legacyVal as AccessLevel;
+          systemModules.find(m => m.id === mod)?.tabs.forEach(t => newAccess[mod][t.id] = legacyVal as AccessLevel);
+        } else {
+          newAccess[mod] = { ...newAccess[mod], ...(legacyVal as unknown as ModuleAccess) };
         }
       }
-    }
-
-    const productPayload = { 
-      name: formData.name, description: formData.description, category: formData.category, unit: formData.unit, stock_quantity: Number(formData.stock_quantity), 
-      price_d2c: Number(formData.price_d2c), price_b2b: Number(formData.price_wholesale), price_distributor: Number(formData.price_distributor), 
-      price_roti_factory: Number(formData.price_roti_factory), price_retail_modern: Number(formData.price_retail_modern), price_retail_old: Number(formData.price_retail_old), 
-      image_urls: uploadedUrls, image_url: uploadedUrls[0] || null
-    }
-
-    const { error } = editId 
-      ? await supabase.from('products').update(productPayload).eq('id', editId) 
-      : await supabase.from('products').insert([productPayload])
-
-    if (error) { toast.error(error.message) } 
-    else {
-      toast.success(editId ? 'Product updated!' : 'Product added!');
-      setFormData({ name: '', description: '', category: 'Retail Flour', unit: 'kg', stock_quantity: '100', price_d2c: '', price_wholesale: '', price_distributor: '', price_roti_factory: '', price_retail_modern: '', price_retail_old: '' })
-      setEditId(null); setImageFiles([]); setImagePreviews([]); setExistingImageUrls([]); fetchProducts() 
-    }
-    setIsSaving(false)
+    });
+    setMatrixState(newAccess);
   }
 
-  const toggleProductSelection = (id: string) => { setSelectedProductIds(prev => prev.includes(id) ? prev.filter(pid => pid !== id) : [...prev, id]) }
-  const toggleAllSelections = () => { if (selectedProductIds.length === filteredInventory.length) setSelectedProductIds([]); else setSelectedProductIds(filteredInventory.map(p => p.id)) }
-  
-  const handleBulkDelete = async () => {
-    if(!confirm(`Delete ${selectedProductIds.length} items?`)) return
-    setIsSaving(true)
-    const { error } = await supabase.from('products').delete().in('id', selectedProductIds)
-    if (!error) { toast.success("Deleted."); setSelectedProductIds([]); fetchProducts() } else { toast.error(error.message) }
-    setIsSaving(false)
-  }
-
-  const handleApplyBulkEdit = async (e: FormEvent) => {
-    e.preventDefault(); setIsSaving(true)
-    let finalValue: string | number = bulkEditValue
-    if (['stock_quantity', 'price_d2c', 'price_b2b', 'price_distributor', 'price_roti_factory', 'price_retail_modern', 'price_retail_old'].includes(bulkEditField)) finalValue = Number(bulkEditValue)
-    const { error } = await supabase.from('products').update({ [bulkEditField]: finalValue }).in('id', selectedProductIds)
-    if (!error) { toast.success(`Bulk updated!`); setShowBulkEditModal(false); setSelectedProductIds([]); fetchProducts() } else { toast.error(error.message) }
-    setIsSaving(false)
-  }
-
-  const downloadCSVTemplate = () => {
-    const headers = "name,description,category,unit,stock_quantity,price_d2c,price_b2b,price_distributor,price_roti_factory,price_retail_modern,price_retail_old\n"
-    const sample = "Premium Chakki Atta,Freshly milled 100% whole wheat,Wheat Flour,kg,500,50,45,42,40,48,49\n"
-    const blob = new Blob([headers + sample], { type: 'text/csv;charset=utf-8;' })
-    const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = "template.csv"; link.click()
-  }
-
-  const handleCSVUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]; if (!file) return; setIsSaving(true); toast('Importing...');
-    const reader = new FileReader(); reader.onload = async ({ target }) => {
-      const text = target?.result as string; const lines = text.split('\n'); const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
-      const bulkData: any[] = []; // FIXED: Strictly typed as any[]
-      for(let i=1; i<lines.length; i++) {
-        if(!lines[i].trim()) continue; const values = lines[i].split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/).map(v => v.replace(/^"|"$/g, '').trim());
-        const obj: Record<string, string | number> = {}; headers.forEach((h, idx) => {
-          if (['stock_quantity', 'price_d2c', 'price_b2b', 'price_distributor', 'price_roti_factory', 'price_retail_modern', 'price_retail_old'].includes(h)) obj[h] = Number(values[idx] || 0); else obj[h] = values[idx] || '';
-        }); bulkData.push(obj)
-      }; const { error } = await supabase.from('products').insert(bulkData);
-      if(!error) { toast.success(`Imported ${bulkData.length} SKUs!`); fetchProducts(); setAddMode('single') } else { toast.error(error.message) }; setIsSaving(false)
-    }; reader.readAsText(file)
-  }
-
-  const handleExportInventory = () => {
-    if (products.length === 0) return toast.error('No products to export')
-    const headers = ['id', 'name', 'description', 'category', 'unit', 'stock_quantity', 'price_d2c', 'price_b2b', 'price_distributor', 'price_roti_factory', 'price_retail_modern', 'price_retail_old']
-    const csvRows = products.map(p => headers.map(h => `"${String((p as any)[h] || '').replace(/"/g, '""')}"`).join(','))
-    const csvContent = [headers.join(','), ...csvRows].join('\n')
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
-    const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = "rgdb_live_inventory.csv"; link.click()
-  }
-
-  const handleUpdateInventoryCSV = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]; if (!file) return; setIsSaving(true); toast('Updating Inventory...', { icon: '⏳' });
-    const reader = new FileReader(); reader.onload = async ({ target }) => {
-      const text = target?.result as string; const lines = text.split('\n'); const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
-      if (!headers.includes('id')) { toast.error('CSV must contain an "id" column for updates.'); setIsSaving(false); return; }
+  const updateMatrixValue = (modId: string, tabId: string, value: AccessLevel) => {
+    setMatrixState(prev => {
+      const newState = { ...prev };
+      if (!newState[modId]) newState[modId] = { _master: 'none' };
       
-      const bulkData: any[] = []; // FIXED: Strictly typed as any[]
-      for(let i=1; i<lines.length; i++) {
-        if(!lines[i].trim()) continue; const values = lines[i].split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/).map(v => v.replace(/^"|"$/g, '').trim());
-        const obj: Record<string, string | number> = {}; headers.forEach((h, idx) => {
-          if (['stock_quantity', 'price_d2c', 'price_b2b', 'price_distributor', 'price_roti_factory', 'price_retail_modern', 'price_retail_old'].includes(h)) obj[h] = Number(values[idx] || 0); else obj[h] = values[idx] || '';
-        }); bulkData.push(obj)
+      if (tabId === '_master') {
+        newState[modId]._master = value;
+        systemModules.find(m => m.id === modId)?.tabs.forEach(t => newState[modId][t.id] = value);
+      } else {
+        newState[modId][tabId] = value;
+        if (value !== 'none' && newState[modId]._master === 'none') {
+          newState[modId]._master = 'read';
+        }
       }
-      
-      const { error } = await supabase.from('products').upsert(bulkData);
-      if(!error) { toast.success(`Successfully updated ${bulkData.length} SKUs!`); fetchProducts(); } else { toast.error(error.message) }; setIsSaving(false)
-    }; reader.readAsText(file)
-    e.target.value = '' 
+      return newState;
+    });
   }
 
-  const handleSaveSettings = async (e: FormEvent) => { e.preventDefault(); setIsSaving(true); const { error } = await supabase.from('store_settings').update({ reward_points_per_unit: storeSettings.reward_points_per_unit, inr_per_reward_point: storeSettings.inr_per_reward_point }).eq('id', 1); if (!error) toast.success('Settings Saved!'); else toast.error(error.message); setIsSaving(false) }
-  const advancePipeline = async (id: string, cur: string) => { const pipe = ['New Order', 'Processing (Milling)', 'Dispatched', 'Delivered']; const idx = pipe.indexOf(cur); if (idx < pipe.length - 1) { await supabase.from('orders').update({ status: pipe[idx + 1] }).eq('id', id); toast.success(`Advanced!`); fetchOrders() } }
-  
-  const handleApproveB2BOrder = async (e: FormEvent) => {
-    e.preventDefault(); if (!negotiatingOrder) return; setIsSaving(true);
-    const total = Number(negotiatingOrder.total_amount) + Number(negoForm.freight) + Number(negoForm.toll) + Number(negoForm.loading) + Number(negoForm.packaging) + Number(negoForm.gateway) + Number(negoForm.other);
-    const { error } = await supabase.from('orders').update({ status: 'Awaiting Payment', total_amount: total, freight_charges: negoForm.freight, toll_charges: negoForm.toll, loading_charges: negoForm.loading, packaging_charges: negoForm.packaging, gateway_charges: negoForm.gateway, other_charges: negoForm.other, payment_terms: negoForm.payment_terms }).eq('id', negotiatingOrder.id);
-    if (!error) { toast.success('Approved!'); const { data } = await supabase.from('user_roles').select('phone_number').eq('id', negotiatingOrder.user_id).single(); const phone = data?.phone_number || ''; if(phone) window.open(`https://wa.me/91${phone.replace(/\D/g,'').slice(-10)}?text=${encodeURIComponent('B2B Order Approved. Terms: '+negoForm.payment_terms+'. Total: ₹'+total)}`, '_blank'); setNegotiatingOrder(null); fetchOrders() } else { toast.error(error.message) }; setIsSaving(false)
+  const handleSavePermissions = async () => {
+    if (!matrixUser) return;
+    setIsSubmitting(true);
+    const { error } = await supabase.from('user_roles').update({ access_levels: matrixState, role: matrixUser.role === 'customer' ? 'sales' : matrixUser.role }).eq('id', matrixUser.id);
+    if (!error) { toast.success(`Permissions saved for ${matrixUser.full_name || matrixUser.email}`); setMatrixUser(null); fetchCommandData(); } else { toast.error(error.message); }
+    setIsSubmitting(false);
   }
 
-  const approveWalletRequest = async (id: string, uid: string, amt: number) => { const { data: u } = await supabase.from('user_roles').select('wallet_balance').eq('id', uid).single(); await supabase.from('user_roles').update({ wallet_balance: (u?.wallet_balance || 0) + amt }).eq('id', uid); await supabase.from('wallet_requests').update({ status: 'Approved' }).eq('id', id); toast.success(`Verified!`); fetchWalletRequests(); fetchClients() }
-  const handleApprovalAction = async (id: string, s: string) => { await supabase.from('user_roles').update({ account_status: s }).eq('id', id); toast.success(`Client ${s}!`); fetchClients() }
-  const handleSaveClientCRM = async (e: FormEvent) => { e.preventDefault(); if(!selectedClient) return; setIsSaving(true); const { error } = await supabase.from('user_roles').update({ credit_limit: selectedClient.credit_limit, payment_terms: selectedClient.payment_terms, special_instructions: selectedClient.special_instructions }).eq('id', selectedClient.id); if (!error) { toast.success("CRM Updated!"); fetchClients(); setSelectedClient(null) } else { toast.error(error.message) }; setIsSaving(false) }
-  const handleDeleteProductActual = async (id: string) => { if(confirm("Delete product?")) { await supabase.from('products').delete().eq('id', id); toast.success("Deleted."); fetchProducts() } }
-  const handleNavClick = (view: typeof activeView) => { setActiveView(view); setIsMobileMenuOpen(false); setSelectedProductIds([]) } // FIXED: Typed view correctly
+  const handleGrantGuestPass = async (moduleName: string) => {
+    if (!accessModalUser) return;
+    setIsSubmitting(true);
+    const currentTime = new Date().getTime();
+    const expiresAt = new Date(currentTime + 24 * 60 * 60 * 1000).toISOString();
+    const currentAccess = accessModalUser.temporary_access || {};
+    const newAccess = { ...currentAccess, [moduleName]: expiresAt };
+    const { error } = await supabase.from('user_roles').update({ temporary_access: newAccess }).eq('id', accessModalUser.id);
+    if (!error) { toast.success(`24H Access to ${moduleName.toUpperCase()} granted!`); setAccessModalUser(null); fetchCommandData(); } else { toast.error(error.message); }
+    setIsSubmitting(false);
+  }
+
+  const handleRevokePass = async (userId: string, moduleName: string, currentAccess: Record<string, string>) => {
+    setIsSubmitting(true);
+    const newAccess = { ...currentAccess };
+    delete newAccess[moduleName];
+    const { error } = await supabase.from('user_roles').update({ temporary_access: newAccess }).eq('id', userId);
+    if (!error) { toast.success("Pass Revoked."); fetchCommandData(); } else { toast.error(error.message); }
+    setIsSubmitting(false);
+  }
+
+  const handleSaveSettings = async (e: FormEvent) => {
+    e.preventDefault(); setIsSubmitting(true);
+    const { error } = await supabase.from('store_settings').update({ reward_points_per_unit: storeSettings.reward_points_per_unit, inr_per_reward_point: storeSettings.inr_per_reward_point }).eq('id', 1);
+    if (!error) toast.success('Global Settings Saved!'); else toast.error(error.message);
+    setIsSubmitting(false);
+  }
+
+  const bottlenecks = { finance: orders.filter(o => o.status === 'Pending Approval').length + walletRequests.length, dispatch: orders.filter(o => o.status === 'Processing (Milling)').length, delivery: orders.filter(o => o.status === 'Dispatched').length }
+  const getStageOwner = (status: string) => { switch(status) { case 'Pending Approval': case 'Awaiting Payment': return { team: 'Finance', color: 'bg-amber-100 text-amber-800' }; case 'Processing (Milling)': return { team: 'Dispatch', color: 'bg-blue-100 text-blue-800' }; case 'Dispatched': return { team: 'Delivery', color: 'bg-indigo-100 text-indigo-800' }; case 'Delivered': return { team: 'Completed', color: 'bg-emerald-100 text-emerald-800' }; default: return { team: 'Sales', color: 'bg-slate-100 text-slate-800' } } }
+
+  const navItems = [{ id: 'overview', icon: Activity, label: 'Command Overview' }, { id: 'pipeline', icon: GitPullRequest, label: 'Global Order Pipeline' }, { id: 'audit', icon: History, label: 'System Audit Logs' }, { id: 'team', icon: Users, label: 'Team & Governance' }, { id: 'settings', icon: Settings, label: 'Global Settings' }]
 
   if (isLoadingAuth) return <div className="min-h-screen flex items-center justify-center bg-slate-50"><Loader2 size={48} className="animate-spin text-indigo-600" /></div>
-  if (!isAuthorized) return <div className="min-h-screen flex items-center justify-center text-center p-12 font-bold text-slate-900"><ShieldAlert size={64} className="mx-auto text-red-500 mb-4" />Access Denied</div>
+  if (!isAuthorized) return <div className="min-h-screen flex items-center justify-center text-center p-12 font-bold text-slate-900"><ShieldAlert size={64} className="mx-auto text-red-500 mb-4" />Super Admin Required.</div>
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col md:flex-row w-full overflow-x-hidden text-slate-900">
-      <div className="md:hidden bg-slate-900 text-white h-16 flex items-center justify-between px-4 sticky top-0 z-30 shrink-0 shadow-md">
-        <div className="font-bold text-lg tracking-tight flex items-center gap-2"><div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-white font-bold text-sm shadow-inner">R</div>RGDB Admin</div>
-        <button onClick={() => setIsMobileMenuOpen(true)} className="p-2 -mr-2 text-slate-300 hover:text-white rounded-full transition-colors"><Menu size={24} /></button>
-      </div>
-
+    <div className="min-h-screen bg-slate-50 flex flex-col md:flex-row w-full overflow-x-hidden text-slate-900 font-sans">
+      <div className="md:hidden bg-slate-900 text-white h-16 flex items-center justify-between px-4 sticky top-0 z-30 shrink-0 shadow-md"><div className="font-bold text-lg flex items-center gap-2"><ShieldCheck size={20}/> Command Center</div><button onClick={() => setIsMobileMenuOpen(true)} className="p-2 text-slate-300"><Menu size={24} /></button></div>
       {isMobileMenuOpen && <div className="fixed inset-0 bg-slate-900/60 z-40 md:hidden backdrop-blur-sm" onClick={() => setIsMobileMenuOpen(false)}></div>}
-
       <aside className={`fixed inset-y-0 left-0 z-50 w-64 bg-slate-900 text-slate-300 flex flex-col transform transition-transform duration-300 ease-in-out md:relative md:translate-x-0 ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'}`}>
-        <div className="h-16 flex items-center justify-between px-6 border-b border-slate-800 shrink-0"><span className="text-white font-bold text-lg tracking-tight">RGDB Admin</span><button onClick={() => setIsMobileMenuOpen(false)} className="md:hidden text-slate-400 hover:text-white transition-colors"><X size={20}/></button></div>
-        <nav className="flex-1 px-4 py-6 space-y-2 overflow-y-auto text-sm">
-          <button onClick={() => handleNavClick('orders')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-colors ${activeView === 'orders' ? 'bg-indigo-600 text-white' : 'hover:bg-slate-800'}`}><ShoppingBag size={20} /> Dashboard & Orders</button>
-          <button onClick={() => handleNavClick('b2b_orders')} className={`w-full flex items-center justify-between px-4 py-3 rounded-xl transition-colors ${activeView === 'b2b_orders' ? 'bg-indigo-600 text-white' : 'hover:bg-slate-800'}`}><div className="flex items-center gap-3"><ClipboardList size={20} /> B2B Approvals</div>{pendingB2BOrdersCount > 0 && <span className="bg-amber-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">{pendingB2BOrdersCount}</span>}</button>
-          <button onClick={() => handleNavClick('finance')} className={`w-full flex items-center justify-between px-4 py-3 rounded-xl transition-colors ${activeView === 'finance' ? 'bg-indigo-600 text-white' : 'hover:bg-slate-800'}`}><div className="flex items-center gap-3"><Banknote size={20} /> Finance & Wallet</div>{walletRequests.length > 0 && <span className="bg-emerald-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">{walletRequests.length}</span>}</button>
-          <button onClick={() => { handleNavClick('add'); setEditId(null); setImagePreviews([]); setImageFiles([]); setExistingImageUrls([]); setFormData({ name: '', description: '', category: 'Retail Flour', unit: 'kg', stock_quantity: '100', price_d2c: '', price_wholesale: '', price_distributor: '', price_roti_factory: '', price_retail_modern: '', price_retail_old: '' }) }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-colors ${activeView === 'add' ? 'bg-indigo-600 text-white' : 'hover:bg-slate-800'}`}><PackagePlus size={20} /> Add Products</button>
-          <button onClick={() => handleNavClick('inventory')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-colors ${activeView === 'inventory' ? 'bg-indigo-600 text-white' : 'hover:bg-slate-800'}`}><LayoutDashboard size={20} /> Live Inventory</button>
-          <button onClick={() => handleNavClick('approvals')} className={`w-full flex items-center justify-between px-4 py-3 rounded-xl transition-colors ${activeView === 'approvals' ? 'bg-indigo-600 text-white' : 'hover:bg-slate-800'}`}><div className="flex items-center gap-3"><Users size={20} /> Activations</div></button>
-          <button onClick={() => handleNavClick('directory')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-colors ${activeView === 'directory' ? 'bg-indigo-600 text-white' : 'hover:bg-slate-800'}`}><Building2 size={20} /> Client CRM</button>
-          <button onClick={() => handleNavClick('settings')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-colors ${activeView === 'settings' ? 'bg-indigo-600 text-white' : 'hover:bg-slate-800'}`}><Settings size={20} /> Store Rewards</button>
-        </nav>
-        <div className="p-4 border-t border-slate-800 shrink-0"><button onClick={() => { toast('Logging out...'); supabase.auth.signOut(); window.location.replace('/auth'); }} className="w-full flex items-center gap-3 px-4 py-3 hover:bg-red-500/10 hover:text-red-400 transition-colors rounded-xl font-bold"><LogOut size={20} /> Logout</button></div>
+        <div className="h-16 flex items-center justify-between px-6 border-b border-slate-800 shrink-0"><span className="text-white font-bold text-lg flex items-center gap-2"><ShieldCheck size={20} className="text-amber-400"/> SUPER ADMIN</span><button onClick={() => setIsMobileMenuOpen(false)} className="md:hidden text-slate-400 hover:text-white"><X size={20}/></button></div>
+        <div className="p-6 border-b border-slate-800 bg-slate-800/30"><p className="text-white font-bold truncate">{adminProfile?.full_name || 'System Admin'}</p><p className="text-[10px] text-slate-400 uppercase tracking-wider mt-1">God Mode Active</p></div>
+        <nav className="flex-1 px-4 py-6 space-y-2">{navItems.map(item => (<button key={item.id} onClick={() => { setActiveView(item.id as any); setIsMobileMenuOpen(false) }} className={`w-full flex items-center justify-between px-4 py-3 rounded-xl transition-all font-bold text-sm ${activeView === item.id ? 'bg-amber-500 text-white shadow-md' : 'hover:bg-slate-800'}`}><div className="flex items-center gap-3"><item.icon size={20} className={activeView === item.id ? 'text-white' : 'text-slate-400'} /> {item.label}</div></button>))}</nav>
+        <div className="p-4 border-t border-slate-800"><button onClick={() => { supabase.auth.signOut(); window.location.replace('/auth'); }} className="w-full flex items-center gap-3 px-4 py-3 hover:bg-rose-500/10 hover:text-rose-400 rounded-xl font-bold transition-colors"><LogOut size={20} /> Logout</button></div>
       </aside>
 
-      <main className="flex-1 w-full max-w-full p-4 md:p-8 overflow-x-hidden">
-        <header className="flex flex-col sm:flex-row justify-between sm:items-center mb-6 md:mb-8 bg-white p-5 rounded-2xl border border-slate-200 shadow-sm gap-4">
-          <h2 className="text-xl font-bold text-slate-800 uppercase tracking-tight">{activeView.replace('_', ' ')}</h2>
-          {overdueCount > 0 && <div className="bg-rose-100 text-rose-700 px-4 py-2 rounded-lg font-bold text-xs flex items-center gap-2"><AlertTriangle size={18}/> {overdueCount} Overdue Requests</div>}
-        </header>
+      <main className="flex-1 p-4 md:p-8 overflow-y-auto max-h-screen">
+        <header className="mb-6 md:mb-8 flex justify-between items-center"><h2 className="text-2xl font-bold text-slate-900 tracking-tight">{navItems.find(n => n.id === activeView)?.label}</h2></header>
 
-        {activeView === 'settings' && (
-          <div className="bg-white p-8 rounded-2xl border max-w-2xl animate-in fade-in shadow-sm">
-            <h3 className="text-xl font-bold mb-6 flex items-center gap-2 text-slate-900"><Settings className="text-indigo-600" /> Reward System</h3>
-            <form onSubmit={handleSaveSettings} className="space-y-6">
-              <div><label className="block text-xs font-bold mb-2 uppercase text-slate-700">R-Cash Per Unit (kg/liter)</label><input type="number" step="0.1" required className="w-full p-3 bg-slate-50 border border-slate-300 rounded-xl font-bold text-slate-900" value={storeSettings.reward_points_per_unit} onChange={e => setStoreSettings({...storeSettings, reward_points_per_unit: Number(e.target.value)})} /></div>
-              <div><label className="block text-xs font-bold mb-2 uppercase text-slate-700">INR Value per R-Cash Point</label><input type="number" step="0.1" required className="w-full p-3 bg-slate-50 border border-slate-300 rounded-xl font-bold text-slate-900" value={storeSettings.inr_per_reward_point} onChange={e => setStoreSettings({...storeSettings, inr_per_reward_point: Number(e.target.value)})} /></div>
-              <button type="submit" disabled={isSaving} className="w-full bg-indigo-600 text-white font-bold py-4 rounded-xl shadow-md flex items-center justify-center gap-2"><Save size={18}/> Update System</button>
-            </form>
-          </div>
-        )}
-
-        {activeView === 'orders' && (
-          <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-            {['New Order', 'Processing (Milling)', 'Dispatched', 'Delivered'].map(stage => (
-              <div key={stage} className="bg-slate-100 p-4 rounded-2xl border min-h-125 flex flex-col">
-                <h3 className="font-bold text-slate-700 mb-4 uppercase text-[10px] tracking-widest">{stage}</h3>
-                <div className="space-y-4 flex-1">
-                  {orders.filter(o => o.status === stage).map(order => (
-                    <div key={order.id} className="bg-white p-4 rounded-xl shadow-sm border group">
-                      <div className="flex justify-between items-start mb-1 text-[10px] font-mono text-slate-400 uppercase">#{order.id.split('-')[0]}<button onClick={() => setSelectedOrder(order)} className="text-indigo-600"><ReceiptText size={14}/></button></div>
-                      <div className="font-bold text-slate-900 leading-tight mb-1">{order.customer_name}</div>
-                      <div className="text-emerald-600 font-bold text-sm">₹{order.total_amount.toLocaleString()}</div>
-                      {stage !== 'Delivered' && <button onClick={() => advancePipeline(order.id, order.status)} className="mt-4 w-full bg-indigo-50 text-indigo-700 py-2 rounded-lg text-xs font-bold flex items-center justify-center gap-1 hover:bg-indigo-100">Advance <ArrowRight size={14}/></button>}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {activeView === 'add' && (
-          <div className="bg-white p-8 rounded-2xl border max-w-4xl shadow-sm">
-            <div className="flex justify-between items-center mb-8">
-              <h3 className="text-xl font-bold flex items-center gap-2 text-slate-900"><PackagePlus className="text-indigo-600" /> Catalog</h3>
-              {!editId && <div className="flex bg-slate-100 p-1 rounded-xl"><button onClick={() => setAddMode('single')} className={`px-4 py-2 rounded-lg text-xs font-bold ${addMode === 'single' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-600'}`}>Single</button><button onClick={() => setAddMode('csv')} className={`px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-1 ${addMode === 'csv' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-600'}`}><FileSpreadsheet size={14}/> CSV</button></div>}
+        {activeView === 'overview' && (
+          <div className="space-y-6 animate-in fade-in">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6"><div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm flex items-center gap-4"><div className="w-14 h-14 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center"><Activity size={28}/></div><div><p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Total Active Orders</p><p className="text-3xl font-black text-slate-900">{orders.filter(o => o.status !== 'Delivered').length}</p></div></div><div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm flex items-center gap-4"><div className="w-14 h-14 bg-amber-50 text-amber-600 rounded-2xl flex items-center justify-center"><AlertOctagon size={28}/></div><div><p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Price Deviations</p><p className="text-3xl font-black text-slate-900">{orders.filter(o => o.is_price_deviated && o.status === 'Pending Approval').length}</p></div></div><div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm flex items-center gap-4"><div className="w-14 h-14 bg-emerald-50 text-emerald-600 rounded-2xl flex items-center justify-center"><CheckCircle2 size={28}/></div><div><p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Today&apos;s Revenue</p><p className="text-3xl font-black text-slate-900">₹{orders.filter(o => o.status === 'Delivered').reduce((acc, o) => acc + o.total_amount, 0).toLocaleString()}</p></div></div></div>
+            <h3 className="text-lg font-bold text-slate-900 mt-8 mb-4">Department Load & Bottlenecks</h3>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div className={`p-6 rounded-3xl border ${bottlenecks.finance > 5 ? 'bg-rose-50 border-rose-200' : 'bg-white border-slate-200'} shadow-sm`}><div className="flex justify-between items-start mb-4"><h4 className="font-bold text-slate-900">Finance Team</h4>{bottlenecks.finance > 5 && <span className="bg-rose-100 text-rose-700 text-[10px] font-bold px-2 py-1 rounded uppercase flex items-center gap-1"><AlertTriangle size={12}/> Bottleneck</span>}</div><div className="space-y-2"><div className="flex justify-between text-sm font-medium"><span>Pending Approvals:</span> <span className="font-bold text-slate-900">{orders.filter(o => o.status === 'Pending Approval').length}</span></div><div className="flex justify-between text-sm font-medium"><span>Pending Payments:</span> <span className="font-bold text-slate-900">{walletRequests.length}</span></div></div></div>
+              <div className={`p-6 rounded-3xl border ${bottlenecks.dispatch > 10 ? 'bg-rose-50 border-rose-200' : 'bg-white border-slate-200'} shadow-sm`}><div className="flex justify-between items-start mb-4"><h4 className="font-bold text-slate-900">Dispatch Team</h4>{bottlenecks.dispatch > 10 && <span className="bg-rose-100 text-rose-700 text-[10px] font-bold px-2 py-1 rounded uppercase flex items-center gap-1"><AlertTriangle size={12}/> Bottleneck</span>}</div><div className="space-y-2"><div className="flex justify-between text-sm font-medium"><span>Awaiting Processing:</span> <span className="font-bold text-slate-900">{bottlenecks.dispatch}</span></div></div></div>
+              <div className={`p-6 rounded-3xl border ${bottlenecks.delivery > 15 ? 'bg-rose-50 border-rose-200' : 'bg-white border-slate-200'} shadow-sm`}><div className="flex justify-between items-start mb-4"><h4 className="font-bold text-slate-900">Delivery Fleet</h4>{bottlenecks.delivery > 15 && <span className="bg-rose-100 text-rose-700 text-[10px] font-bold px-2 py-1 rounded uppercase flex items-center gap-1"><AlertTriangle size={12}/> Bottleneck</span>}</div><div className="space-y-2"><div className="flex justify-between text-sm font-medium"><span>Currently on Road:</span> <span className="font-bold text-slate-900">{bottlenecks.delivery}</span></div></div></div>
             </div>
-            {addMode === 'single' ? (
-              <form onSubmit={handleAddProduct} className="space-y-8">
-                <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-5 gap-4">
-                  {existingImageUrls.map((url, i) => (<div key={i} className="relative aspect-square rounded-xl overflow-hidden border group"><img src={url} className="w-full h-full object-cover" alt=""/><button type="button" onClick={() => removeExistingImage(url)} className="absolute top-1 right-1 bg-rose-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100"><X size={12}/></button></div>))}
-                  {imagePreviews.map((src, i) => (<div key={i} className="relative aspect-square rounded-xl border-2 border-indigo-200 overflow-hidden group"><img src={src} className="w-full h-full object-cover" alt=""/><button type="button" onClick={() => removeNewImage(i)} className="absolute top-1 right-1 bg-rose-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100"><X size={12}/></button></div>))}
-                  <label className="aspect-square rounded-xl border-2 border-dashed border-slate-300 flex flex-col items-center justify-center text-slate-400 hover:border-indigo-500 hover:bg-indigo-50 cursor-pointer"><UploadCloud size={24}/><input type="file" multiple accept="image/*" onChange={handleImageChange} className="hidden"/></label>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6"><input required placeholder="Name" className="w-full p-3 bg-slate-50 border border-slate-300 text-slate-900 rounded-xl placeholder-slate-400" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} /><input required placeholder="Category" className="w-full p-3 bg-slate-50 border border-slate-300 text-slate-900 rounded-xl placeholder-slate-400" value={formData.category} onChange={e => setFormData({...formData, category: e.target.value})} /></div>
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-6">
-                  <select className="p-3 bg-white border border-slate-300 text-slate-900 rounded-xl font-bold" value={formData.unit} onChange={e => setFormData({...formData, unit: e.target.value})}>
-                    <option value="kg" className="bg-white text-slate-900">kg</option>
-                    <option value="liter" className="bg-white text-slate-900">liter</option>
-                    <option value="packet" className="bg-white text-slate-900">packet</option>
+          </div>
+        )}
+
+        {activeView === 'pipeline' && (
+          <div className="bg-white rounded-3xl shadow-sm border border-slate-200 w-full overflow-hidden animate-in fade-in">
+            <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50"><div><h3 className="font-bold text-slate-900">All Master Orders</h3><p className="text-xs text-slate-500 mt-1">Cross-departmental pipeline tracker.</p></div><div className="relative w-64"><Search className="absolute left-3 top-2.5 text-slate-400" size={16}/><input type="text" placeholder="Search orders..." className="w-full pl-9 pr-4 py-2 bg-white border border-slate-200 rounded-full text-sm outline-none focus:border-amber-500" /></div></div>
+            <div className="overflow-x-auto w-full"><table className="w-full text-left whitespace-nowrap"><thead className="bg-white border-b border-slate-100 text-xs text-slate-500 font-bold uppercase tracking-wider"><tr><th className="p-5">Order ID</th><th className="p-5">Customer</th><th className="p-5">Current Dependency</th><th className="p-5 text-right">Value</th><th className="p-5 text-center">Admin Override</th></tr></thead><tbody className="divide-y divide-slate-50 text-sm">
+                  {orders.map(o => { const owner = getStageOwner(o.status); return (<tr key={o.id} className="hover:bg-slate-50 transition-colors"><td className="p-5 font-mono font-bold text-slate-500 text-xs">#{o.id.split('-')[0].toUpperCase()}</td><td className="p-5"><p className="font-bold text-slate-900">{o.customer_name}</p><p className="text-[10px] text-slate-400 mt-0.5">{new Date(o.created_at).toLocaleString()}</p></td><td className="p-5"><div className="flex flex-col items-start gap-1"><span className={`px-2.5 py-1 rounded text-[10px] font-bold uppercase tracking-wider ${owner.color}`}>Pending: {owner.team}</span><span className="text-xs font-bold text-slate-600">{o.status}</span></div></td><td className="p-5 text-right font-bold text-slate-900">₹{o.total_amount.toLocaleString()}</td><td className="p-5 text-center"><button onClick={() => setSelectedOrder(o)} className="inline-flex items-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-xl font-bold text-xs transition-colors"><Eye size={14}/> Inspect & Override</button></td></tr>)})}
+            </tbody></table></div>
+          </div>
+        )}
+
+        {activeView === 'audit' && (
+          <div className="bg-white rounded-3xl shadow-sm border border-slate-200 w-full overflow-hidden animate-in fade-in">
+            <div className="p-6 border-b border-slate-100 bg-slate-50/50"><h3 className="font-bold text-slate-900">Immutable Audit Trail</h3><p className="text-xs text-slate-500 mt-1">Tracks every critical action taken by internal staff across the platform.</p></div>
+            <div className="divide-y divide-slate-50 p-2">{activities.length === 0 ? <p className="p-8 text-center text-slate-500">No system logs found.</p> : activities.map(act => (<div key={act.id} className="p-4 flex gap-4 hover:bg-slate-50 rounded-xl transition-colors"><div className="mt-1"><div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-500"><History size={14}/></div></div><div className="flex-1"><div className="flex items-center gap-2 mb-1"><p className="text-xs font-bold text-slate-900">{act.user_roles?.full_name || 'System'}</p><span className="text-[10px] bg-slate-200 text-slate-700 px-2 py-0.5 rounded font-bold uppercase tracking-wider">{act.user_roles?.role || 'Auto'}</span><span className="text-[10px] text-slate-400 ml-auto">{new Date(act.created_at).toLocaleString()}</span></div><p className="text-[10px] font-bold text-indigo-600 uppercase tracking-widest mb-1">{act.action_type}</p><p className="text-sm font-medium text-slate-700">{act.description}</p></div></div>))}</div>
+          </div>
+        )}
+
+        {activeView === 'team' && (
+          <div className="space-y-6 animate-in fade-in">
+            <div className="bg-white p-8 rounded-3xl border shadow-sm max-w-4xl">
+              <div className="border-b border-slate-100 pb-4 mb-6">
+                <h3 className="text-xl font-bold text-slate-900 flex items-center gap-2"><UserPlus className="text-indigo-600" /> Promote User to Staff</h3>
+                <p className="text-sm text-slate-500 mt-1">Assign primary roles to users. Note: Changing a role wipes their previous custom access matrix to prevent security leaks.</p>
+              </div>
+              <form onSubmit={handleAssignRole} className="flex flex-col md:flex-row gap-4 items-end">
+                <div className="flex-1 w-full">
+                  <label className="block text-xs font-bold mb-2 text-slate-700 uppercase">Select Any User</label>
+                  <select required value={roleAssignUserId} onChange={e => setRoleAssignUserId(e.target.value)} className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl font-bold outline-none focus:ring-2 focus:ring-indigo-500">
+                    <option value="" disabled>-- Search User --</option>
+                    {allUsers.filter(u => u.role !== 'admin').map(u => <option key={u.id} value={u.id}>{u.email} ({u.role.toUpperCase()})</option>)}
                   </select>
-                  <input required type="number" placeholder="Stock" className="col-span-2 p-3 bg-slate-50 border border-slate-300 text-slate-900 rounded-xl font-bold placeholder-slate-400" value={formData.stock_quantity} onChange={e => setFormData({...formData, stock_quantity: e.target.value})} />
                 </div>
-                <textarea required placeholder="Description" rows={3} className="w-full p-3 bg-slate-50 border border-slate-300 text-slate-900 rounded-xl placeholder-slate-400" value={formData.description} onChange={e => setFormData({...formData, description: e.target.value})} />
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-4 bg-slate-50 p-6 rounded-2xl border border-slate-200">
-                  {['price_d2c', 'price_wholesale', 'price_distributor', 'price_roti_factory', 'price_retail_modern', 'price_retail_old'].map(f => (
-                    <div key={f} className="space-y-1"><label className="text-[10px] font-bold text-slate-600 uppercase">{f.replace('price_', '').replace('_', ' ')} ₹</label><input required type="number" className="w-full p-2 border border-slate-300 text-slate-900 bg-white rounded-lg font-bold" value={(formData as any)[f]} onChange={e => setFormData({...formData, [f]: e.target.value})} /></div>
-                  ))}
+                <div className="w-full md:w-64">
+                  <label className="block text-xs font-bold mb-2 text-slate-700 uppercase">Select Primary Role</label>
+                  <select value={roleAssignRole} onChange={e => setRoleAssignRole(e.target.value)} className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl font-bold outline-none focus:ring-2 focus:ring-indigo-500">
+                    <option value="customer">Customer (Demote)</option>
+                    <option value="sales">Sales Agent</option>
+                    <option value="finance">Finance Manager</option>
+                    <option value="inventory">Inventory Manager</option>
+                    <option value="dispatch">Dispatch Manager</option>
+                    <option value="delivery">Delivery Driver</option>
+                  </select>
                 </div>
-                <button type="submit" disabled={isSaving} className="w-full bg-slate-900 text-white font-bold py-4 rounded-xl shadow-lg flex items-center justify-center gap-2">{isSaving ? <Loader2 size={20} className="animate-spin" /> : <Save size={20} />} {editId ? 'Update' : 'Save'} SKU</button>
+                <button type="submit" disabled={isSubmitting} className="w-full md:w-auto bg-slate-900 hover:bg-slate-800 text-white font-bold py-4 px-8 rounded-xl shadow-md transition-colors">{isSubmitting ? <Loader2 size={18} className="animate-spin mx-auto"/> : 'Apply Role'}</button>
               </form>
-            ) : (
-              <div className="space-y-8 text-center py-8">
-                <div className="bg-indigo-50 border border-indigo-100 rounded-2xl p-6 flex flex-col md:flex-row items-center justify-between gap-6">
-                  <div className="text-left"><h4 className="font-bold text-indigo-900 mb-1">CSV Bulk Upload</h4><p className="text-sm text-indigo-800">Populate your inventory instantly via Excel.</p></div>
-                  <button onClick={downloadCSVTemplate} className="bg-white text-indigo-700 px-6 py-2 rounded-xl font-bold shadow-sm flex items-center gap-2 border border-indigo-200"><Download size={18}/> Template</button>
-                </div>
-                <label className="block w-full border-2 border-dashed border-slate-300 rounded-3xl p-16 hover:bg-slate-50 cursor-pointer transition-all"><UploadCloud size={48} className="mx-auto text-slate-400 mb-4"/><p className="font-bold text-slate-700">Select CSV File</p><p className="text-xs text-slate-500 mt-2">Maximum 5,000 SKUs per upload</p><input type="file" accept=".csv" onChange={handleCSVUpload} className="hidden"/></label>
-              </div>
-            )}
-          </div>
-        )}
+            </div>
 
-        {activeView === 'inventory' && (
-          <div className="space-y-4">
-            <div className="flex flex-col lg:flex-row gap-4 justify-between bg-white p-4 rounded-2xl border shadow-sm items-center">
-              <div className="flex items-center gap-3 w-full lg:w-auto">
-                <div className="relative flex-1 lg:w-64"><Search className="absolute left-3 top-2.5 text-slate-400" size={18}/><input type="text" placeholder="Search..." value={inventorySearch} onChange={e => setInventorySearch(e.target.value)} className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-300 rounded-full text-sm outline-none text-slate-900" /></div>
-                <select value={inventoryCategory} onChange={e => setInventoryCategory(e.target.value)} className="bg-white border border-slate-300 text-slate-900 text-sm py-2 px-4 rounded-full font-bold shadow-sm">
-                  {inventoryCategories.map(cat => <option key={cat} value={cat} className="bg-white text-slate-900">{cat}</option>)}
-                </select>
+            <div className="bg-white rounded-3xl border shadow-sm max-w-5xl overflow-hidden">
+              <div className="p-6 md:p-8 border-b border-slate-100 bg-slate-50/50">
+                <h3 className="text-xl font-bold text-slate-900">Active Internal Roster & Access Control</h3>
+                <p className="text-sm text-slate-500 mt-1">Configure deep tab-level permissions or grant 24H temporary guest passes.</p>
               </div>
-              
-              <div className="flex flex-wrap items-center gap-3 w-full lg:w-auto mt-2 lg:mt-0">
-                <div className="flex bg-slate-100 p-1 rounded-xl">
-                  <button onClick={handleExportInventory} className="bg-white text-slate-700 px-4 py-1.5 rounded-lg text-xs font-bold shadow-sm flex items-center gap-1 border border-slate-200"><Download size={14}/> Export CSV</button>
-                  <label className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-1.5 rounded-lg text-xs font-bold shadow-sm flex items-center gap-1 cursor-pointer transition-colors ml-1">
-                    <UploadCloud size={14}/> Update CSV
-                    <input type="file" accept=".csv" onChange={handleUpdateInventoryCSV} className="hidden"/>
-                  </label>
-                </div>
+              <div className="divide-y divide-slate-100 p-2">
+                {allUsers.filter(c => c.role !== 'customer').map(staff => (
+                  <div key={staff.id} className="flex flex-col lg:flex-row lg:items-center justify-between p-4 hover:bg-slate-50 rounded-2xl transition-colors gap-4">
+                    <div className="w-full lg:w-1/3">
+                      <div className="flex items-center gap-2">
+                        <p className="font-bold text-slate-900 text-lg">{staff.full_name || 'Unnamed Staff'}</p>
+                        {staff.role === 'admin' && <span className="bg-amber-100 text-amber-800 px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider border border-amber-200">Admin</span>}
+                      </div>
+                      <p className="text-sm text-slate-500 mt-1">{staff.email}</p>
+                      
+                      {staff.temporary_access && Object.keys(staff.temporary_access).length > 0 && (
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {Object.entries(staff.temporary_access).map(([mod, expires]) => {
+                            if (new Date(expires) < new Date()) return null;
+                            return (
+                              <div key={mod} className="bg-amber-50 border border-amber-200 text-amber-800 px-2 py-1 rounded-md text-[10px] font-bold uppercase flex items-center gap-1">
+                                <Key size={10}/> Guest: {mod} 
+                                <button onClick={() => handleRevokePass(staff.id, mod, staff.temporary_access || {})} className="ml-1 text-amber-500 hover:text-amber-900"><X size={12}/></button>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )}
+                    </div>
+                    
+                    <div className="flex-1 flex flex-wrap gap-2">
+                      {systemModules.map(mod => {
+                        if (staff.role === 'admin') return <span key={mod.id} className="bg-emerald-50 border border-emerald-200 text-emerald-700 px-3 py-1 rounded-lg text-xs font-bold uppercase tracking-wider">{mod.id}: Write</span>
+                        const access = staff.access_levels?.[mod.id]?._master || 'none';
+                        if (access === 'none') return null;
+                        return (
+                          <span key={mod.id} className={`px-3 py-1 rounded-lg text-xs font-bold uppercase tracking-wider border ${access === 'write' ? 'bg-indigo-50 border-indigo-200 text-indigo-700' : 'bg-slate-100 border-slate-200 text-slate-600'}`}>
+                            {mod.id}: {access}
+                          </span>
+                        )
+                      })}
+                      {staff.role !== 'admin' && (!staff.access_levels || Object.values(staff.access_levels).every(v => v._master === 'none')) && <span className="text-sm italic text-slate-400">No active module access.</span>}
+                    </div>
 
-                {selectedProductIds.length > 0 && (
-                  <div className="flex items-center gap-3 bg-indigo-50 px-4 py-1.5 rounded-xl border-indigo-200 border shrink-0">
-                    <span className="text-xs font-bold text-indigo-800">{selectedProductIds.length} Selected</span>
-                    <button onClick={() => setShowBulkEditModal(true)} className="bg-indigo-600 text-white px-3 py-1 rounded-lg text-[10px] font-bold">Bulk Edit</button>
-                    <button onClick={handleBulkDelete} className="text-rose-600 hover:bg-rose-100 p-1 rounded"><Trash2 size={16}/></button>
+                    <div className="flex items-center gap-3 shrink-0">
+                      {staff.role !== 'admin' && (
+                        <>
+                          <button onClick={() => openPermissionMatrix(staff)} className="bg-white border border-slate-200 hover:border-indigo-300 text-slate-700 hover:text-indigo-700 px-4 py-2.5 rounded-xl text-sm font-bold transition-colors flex items-center gap-2 shadow-sm"><Edit3 size={16}/> Edit Matrix</button>
+                          <button onClick={() => setAccessModalUser(staff)} className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2.5 rounded-lg text-xs font-bold transition-colors flex items-center gap-2"><Key size={14}/> Guest Pass</button>
+                        </>
+                      )}
+                    </div>
                   </div>
-                )}
-              </div>
-            </div>
-            
-            <div className="bg-white rounded-2xl border shadow-sm w-full overflow-hidden">
-              <div className="overflow-x-auto w-full">
-                <table className="w-full text-left whitespace-nowrap min-w-150">
-                  <thead className="bg-slate-50 border-b text-xs text-slate-600 font-bold uppercase">
-                    <tr>
-                      <th className="p-4 w-12"><button onClick={toggleAllSelections} className={`w-5 h-5 rounded border flex items-center justify-center ${selectedProductIds.length === filteredInventory.length && filteredInventory.length > 0 ? 'bg-indigo-600 border-indigo-600 text-white' : 'border-slate-300'}`}>{selectedProductIds.length === filteredInventory.length && filteredInventory.length > 0 && <Check size={12}/>}</button></th>
-                      <th className="p-4">SKU Info</th><th className="p-4 text-center">Stock</th><th className="p-4 text-center">Price</th><th className="p-4 text-right">Action</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y text-sm">
-                    {filteredInventory.map(p => (
-                      <tr key={p.id} className={selectedProductIds.includes(p.id) ? 'bg-indigo-50/30' : 'hover:bg-slate-50'}>
-                        <td className="p-4"><button onClick={() => toggleProductSelection(p.id)} className={`w-5 h-5 rounded border flex items-center justify-center ${selectedProductIds.includes(p.id) ? 'bg-indigo-600 border-indigo-600 text-white' : 'border-slate-300'}`}>{selectedProductIds.includes(p.id) && <Check size={12}/>}</button></td>
-                        <td className="p-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-slate-100 overflow-hidden border">{p.image_urls?.[0] ? <img src={p.image_urls[0]} className="w-full h-full object-cover" alt=""/> : <ImageIcon size={18} className="m-auto text-slate-400"/>}</div><div><div className="font-bold text-slate-900">{p.name}</div><div className="text-[10px] text-slate-500">{p.category}</div></div></div></td>
-                        <td className="p-4 text-center font-mono font-bold text-slate-800">{p.stock_quantity} {p.unit}</td><td className="p-4 text-center font-bold text-emerald-700">₹{p.price_d2c}</td>
-                        <td className="p-4 text-right"><div className="flex justify-end gap-1"><button onClick={() => handleEditClick(p)} className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg"><Edit size={16}/></button><button onClick={() => handleDeleteProductActual(p.id)} className="p-2 text-rose-500 hover:bg-rose-50 rounded-lg"><Trash2 size={16}/></button></div></td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                ))}
               </div>
             </div>
           </div>
         )}
 
-        {activeView === 'b2b_orders' && (
-          <div className="space-y-4">
-            <h3 className="text-lg md:text-xl font-bold mb-4 text-slate-800">Pending B2B Approvals</h3>
-            {orders.filter(o => o.status === 'Pending Approval').length === 0 ? <div className="p-12 bg-white rounded-2xl text-center text-slate-500 border border-slate-200 font-medium">No pending requests.</div> : orders.filter(o => o.status === 'Pending Approval').map(order => (
-              <div key={order.id} className="bg-white p-5 md:p-6 rounded-2xl border border-slate-200 flex flex-col md:flex-row items-start md:items-center justify-between shadow-sm gap-4 animate-in fade-in">
-                <div className="w-full md:w-auto"><div className="font-bold text-lg text-slate-900">{order.customer_name}</div><div className="text-amber-700 font-mono text-xs md:text-sm bg-amber-50 px-2 py-1 rounded inline-block mt-2 md:mt-1 border border-amber-200">#{order.id.split('-')[0].toUpperCase()}</div><div className="text-slate-500 text-xs mt-2">{new Date(order.created_at).toLocaleString()}</div></div>
-                <div className="flex flex-row md:flex-row items-center justify-between w-full md:w-auto gap-4 mt-2 md:mt-0 pt-4 md:pt-0 border-t border-slate-100 md:border-t-0">
-                  <div className="text-xl md:text-2xl font-bold text-slate-900">₹{order.total_amount.toLocaleString()} <span className="text-xs text-slate-500 font-medium block md:inline">(Base Total)</span></div>
-                  <button onClick={() => { setNegotiatingOrder(order); setNegoForm({ freight: 0, toll: 0, loading: 0, packaging: 0, gateway: 0, other: 0, payment_terms: '100% Advance' }); }} className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 md:px-5 md:py-2.5 rounded-xl font-bold flex items-center gap-2 transition-colors active:scale-95 text-sm md:text-base shadow-sm"><Calculator size={18}/> Review & Quote</button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
+        {/* 5. MODERNIZED GLOBAL SETTINGS */}
+        {activeView === 'settings' && (
+          <div className="space-y-6 animate-in fade-in max-w-4xl">
+            <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm relative overflow-hidden">
+              <div className="relative z-10">
+                <h3 className="text-2xl font-bold mb-2 flex items-center gap-2 text-slate-900"><Sparkles className="text-indigo-600" /> Reward System Engine</h3>
+                <p className="text-slate-500 mb-8">Configure how customers earn and redeem R-Cash (Loyalty Points) across the D2C and B2B storefronts.</p>
+                
+                <form onSubmit={handleSaveSettings} className="space-y-8">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                    <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200">
+                      <div className="flex items-center gap-3 mb-4">
+                        <div className="w-10 h-10 bg-indigo-100 text-indigo-600 flex items-center justify-center rounded-xl"><Gift size={20}/></div>
+                        <h4 className="font-bold text-slate-800 text-lg">Earning Rule</h4>
+                      </div>
+                      <label className="block text-xs font-bold mb-2 uppercase text-slate-500">R-Cash Earned per 1 Unit (kg/liter)</label>
+                      <div className="relative">
+                        <input type="number" step="0.1" required className="w-full p-4 pl-6 bg-white border border-slate-300 rounded-xl font-bold text-slate-900 outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm transition-shadow text-lg" value={storeSettings.reward_points_per_unit} onChange={e => setStoreSettings({...storeSettings, reward_points_per_unit: Number(e.target.value)})} />
+                        <span className="absolute right-4 top-4 text-slate-400 font-bold">Pts</span>
+                      </div>
+                    </div>
 
-        {activeView === 'approvals' && (
-          <div className="space-y-4">{pendingClients.length === 0 ? <div className="p-8 bg-white rounded-2xl text-center text-slate-500 font-medium">No pending approvals.</div> : pendingClients.map(client => (<div key={client.id} className="bg-white p-5 rounded-2xl border border-slate-200 flex flex-col md:flex-row items-start md:items-center justify-between gap-4"><div><div className="font-bold text-lg text-slate-900">{client.company_name}</div><div className="text-slate-700 text-sm mt-1 bg-slate-100 px-2 py-0.5 rounded inline-block font-bold">{client.client_type}</div></div><div className="flex gap-2"><button onClick={() => handleApprovalAction(client.id, 'active')} className="bg-emerald-600 text-white px-5 py-2.5 rounded-xl font-bold flex items-center gap-2"><Check size={18}/> Approve</button></div></div>))}</div>
-        )}
-
-        {activeView === 'finance' && (
-          <div className="space-y-4">
-            <h3 className="text-lg md:text-xl font-bold mb-4 text-slate-800">Pending Wallet Reloads</h3>
-            {walletRequests.length === 0 ? <div className="p-8 md:p-12 bg-white rounded-2xl text-center text-slate-500 font-medium text-sm md:text-base border border-slate-200">No pending payment requests.</div> : walletRequests.map(req => (
-              <div key={req.id} className="bg-white p-5 md:p-6 rounded-2xl border border-slate-200 flex flex-col md:flex-row items-start md:items-center justify-between shadow-sm gap-4">
-                <div className="w-full md:w-auto"><div className="font-bold text-lg text-slate-900">{req.customer_name}</div><div className="text-indigo-700 font-mono text-xs md:text-sm bg-indigo-50 px-2 py-1 rounded inline-block mt-2 md:mt-1 break-all font-bold">UTR: {req.utr_number}</div></div>
-                <div className="flex items-center justify-between w-full md:w-auto gap-4 border-t border-slate-100 md:border-t-0 pt-4 md:pt-0"><div className="text-xl md:text-2xl font-bold text-emerald-600">₹{req.amount.toLocaleString()}</div><button onClick={() => approveWalletRequest(req.id, req.user_id, req.amount)} className="bg-emerald-600 text-white px-4 py-2 rounded-xl font-bold"><Check size={18}/> Verify</button></div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {activeView === 'directory' && (
-           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm w-full overflow-hidden animate-in fade-in slide-in-from-bottom-4"><div className="overflow-x-auto w-full"><table className="w-full text-left whitespace-nowrap min-w-125"><thead className="bg-slate-50 border-b border-slate-200"><tr><th className="p-4 text-xs font-bold text-slate-600 uppercase">Company / Name</th><th className="p-4 text-xs font-bold text-slate-600 uppercase">Tier & Terms</th><th className="p-4 text-xs font-bold text-slate-600 uppercase">Wallet Balance</th><th className="p-4 text-xs font-bold text-slate-600 uppercase text-right">Actions</th></tr></thead><tbody className="divide-y divide-slate-100">{activeB2BClients.length === 0 ? <tr><td colSpan={4} className="p-8 text-center text-slate-500 font-medium text-sm">No active partners found.</td></tr> : activeB2BClients.map(c => (<tr key={c.id} className="hover:bg-slate-50 transition-colors"><td className="p-4"><div className="font-bold text-slate-900">{c.company_name || c.full_name || 'Unnamed Client'}</div><div className="text-xs text-slate-600 font-medium">{c.email}</div></td><td className="p-4"><span className="bg-indigo-50 text-indigo-800 px-2.5 py-1 rounded-md text-xs font-bold uppercase tracking-wider inline-block mb-1">{c.client_type}</span><div className="text-xs text-slate-500 font-medium">{c.payment_terms || 'Prepaid'}</div></td><td className="p-4 font-mono font-bold text-emerald-700">₹{(c.wallet_balance || 0).toLocaleString()}</td><td className="p-4 text-right"><button onClick={() => setSelectedClient(c)} className="bg-slate-100 hover:bg-slate-200 text-slate-800 px-4 py-2 rounded-xl text-sm font-bold transition-colors shadow-sm">Manage CRM</button></td></tr>))}</tbody></table></div></div>
-        )}
-
-      </main>
-
-      {/* --- BULK EDIT MODAL --- */}
-      {showBulkEditModal && (
-        <div className="fixed inset-0 z-70 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setShowBulkEditModal(false)}></div>
-          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 animate-in zoom-in-95">
-            <h3 className="text-xl font-bold text-slate-900 mb-1">Bulk Edit</h3><p className="text-sm text-slate-600 mb-6">Updating <strong className="text-indigo-600">{selectedProductIds.length}</strong> items.</p>
-            <form onSubmit={handleApplyBulkEdit} className="space-y-4">
-              <div>
-                <label className="block text-xs font-bold mb-2 text-slate-700">Field</label>
-                <select value={bulkEditField} onChange={(e) => setBulkEditField(e.target.value)} className="w-full p-3 bg-white border border-slate-300 text-slate-900 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 font-bold">
-                  <option value="category" className="bg-white text-slate-900">Category</option>
-                  <option value="stock_quantity" className="bg-white text-slate-900">Stock</option>
-                  <option value="price_d2c" className="bg-white text-slate-900">Retail Price</option>
-                  <option value="price_b2b" className="bg-white text-slate-900">Wholesale Price</option>
-                </select>
-              </div>
-              <div><label className="block text-xs font-bold mb-2 text-slate-700">Value</label><input required type={['category'].includes(bulkEditField) ? "text" : "number"} className="w-full p-3 bg-white border border-slate-300 text-slate-900 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 font-bold" value={bulkEditValue} onChange={(e) => setBulkEditValue(e.target.value)} /></div>
-              <div className="flex gap-3 justify-end pt-4"><button type="button" onClick={() => setShowBulkEditModal(false)} className="px-5 py-2.5 font-bold text-slate-700 hover:bg-slate-100 rounded-xl transition-colors">Cancel</button><button type="submit" disabled={isSaving} className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2.5 rounded-xl font-bold shadow-md transition-colors">Apply to All</button></div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* --- CRM MODAL --- */}
-      {selectedClient && (
-         <div className="fixed inset-0 z-60 flex items-center justify-center p-4"><div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setSelectedClient(null)}></div><div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-3xl overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]"><div className="bg-slate-50 p-5 md:p-6 border-b border-slate-200 flex justify-between items-center shrink-0"><div><h3 className="text-xl font-bold text-slate-900">{selectedClient.company_name || 'Client Profile'}</h3><div className="flex gap-2 mt-1"><span className="bg-indigo-100 text-indigo-800 px-2 py-0.5 rounded text-xs font-bold uppercase">{selectedClient.client_type}</span>{selectedClient.gst_number && <span className="bg-slate-200 text-slate-800 px-2 py-0.5 rounded text-xs font-mono font-bold uppercase">GST: {selectedClient.gst_number}</span>}</div></div><button onClick={() => setSelectedClient(null)} className="p-2 text-slate-500 hover:bg-slate-200 hover:text-slate-900 rounded-full transition-colors"><X size={20}/></button></div><div className="p-5 md:p-6 overflow-y-auto flex-1 bg-slate-50/50"><div className="grid grid-cols-1 md:grid-cols-2 gap-8"><div><h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-4 border-b border-slate-200 pb-2">Customer Details</h4><div className="space-y-3 text-sm"><p><span className="text-slate-600 font-medium w-24 inline-block">Contact:</span> <span className="font-bold text-slate-900">{selectedClient.full_name || '-'}</span></p><p><span className="text-slate-600 font-medium w-24 inline-block">Email:</span> <span className="font-bold text-slate-900">{selectedClient.email}</span></p><p><span className="text-slate-600 font-medium w-24 inline-block">Phone:</span> <span className="font-bold text-slate-900">{selectedClient.phone_number || '-'}</span></p><div className="pt-2"><span className="text-slate-600 font-medium block mb-1">Billing Address:</span><p className="font-bold text-slate-900 bg-white p-3 rounded-lg border border-slate-200 text-xs whitespace-pre-wrap">{selectedClient.billing_address || '-'}</p></div></div></div><div><h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-4 border-b border-slate-200 pb-2">Admin Controls</h4><form id="crm-form" onSubmit={handleSaveClientCRM} className="space-y-4"><div className="bg-emerald-50 p-4 rounded-xl border border-emerald-200 flex justify-between items-center mb-4"><span className="text-sm font-bold text-emerald-900">Ledger</span><span className="text-xl font-bold text-emerald-700">₹{(selectedClient.wallet_balance || 0).toLocaleString()}</span></div><div><label className="block text-xs font-bold text-slate-700 uppercase mb-1">Credit Limit</label><input type="number" className="w-full p-3 bg-white border border-slate-300 text-slate-900 rounded-xl font-bold" value={selectedClient.credit_limit || 0} onChange={(e) => setSelectedClient({...selectedClient, credit_limit: Number(e.target.value)})} /></div><div><label className="block text-xs font-bold text-slate-700 uppercase mb-1">Terms</label><select className="w-full p-3 bg-white border border-slate-300 text-slate-900 rounded-xl font-bold" value={selectedClient.payment_terms || 'Prepaid'} onChange={(e) => setSelectedClient({...selectedClient, payment_terms: e.target.value})}><option value="Prepaid" className="bg-white text-slate-900">Prepaid</option><option value="Net 15" className="bg-white text-slate-900">Net 15</option><option value="Net 30" className="bg-white text-slate-900">Net 30</option></select></div><div><label className="block text-xs font-bold text-slate-700 uppercase mb-1">Notes</label><textarea rows={3} className="w-full p-3 bg-white border border-slate-300 text-slate-900 rounded-xl text-sm font-medium" value={selectedClient.special_instructions || ''} onChange={(e) => setSelectedClient({...selectedClient, special_instructions: e.target.value})} /></div></form></div></div></div><div className="bg-white p-5 border-t border-slate-200 flex justify-end gap-3"><button onClick={() => setSelectedClient(null)} className="px-5 py-2.5 font-bold text-slate-700 hover:bg-slate-100 transition-colors rounded-xl">Cancel</button><button type="submit" form="crm-form" className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2.5 rounded-xl font-bold shadow-md transition-colors">Save CRM</button></div></div></div>
-      )}
-
-      {/* --- INVOICE MODAL --- */}
-      {selectedOrder && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 print:p-0 print:bg-white print:block">
-          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm print:hidden" onClick={() => setSelectedOrder(null)}></div>
-          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden animate-in zoom-in-95 duration-200 print:shadow-none print:w-full print:max-w-full print:rounded-none flex flex-col max-h-[90vh] md:max-h-[85vh]">
-            <div className="bg-slate-50 p-4 md:p-6 border-b border-slate-200 flex justify-between items-center shrink-0 print:bg-white"><div className="flex items-center gap-3"><div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white font-bold text-xl print:bg-black">R</div><div><h3 className="text-xl font-bold text-slate-900">Tax Invoice</h3><p className="text-sm font-mono text-slate-600 uppercase">#{selectedOrder.id.split('-')[0]}</p></div></div><div className="flex gap-2 print:hidden"><button onClick={() => window.print()} className="p-2 text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-lg flex items-center gap-2 font-bold text-sm transition-colors border border-indigo-100"><Printer size={16}/> Print</button><button onClick={() => setSelectedOrder(null)} className="p-2 text-slate-500 hover:bg-slate-200 hover:text-slate-900 rounded-lg transition-colors"><X size={20}/></button></div></div>
-            <div className="p-6 overflow-y-auto flex-1">
-              <div className="flex flex-col sm:flex-row justify-between mb-6 pb-6 border-b border-slate-200 border-dashed gap-4"><div><p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Billed To</p><p className="font-bold text-lg text-slate-900">{selectedOrder.customer_name}</p></div><div className="sm:text-right"><p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Status</p><p className="font-bold text-indigo-700">{selectedOrder.status}</p></div></div>
-              <table className="w-full text-left whitespace-nowrap min-w-100">
-                <thead className="bg-slate-50 border-y border-slate-200"><tr><th className="py-3 px-4 text-xs font-bold text-slate-600 uppercase">Item</th><th className="py-3 px-4 text-xs font-bold text-slate-600 uppercase text-right">Qty</th><th className="py-3 px-4 text-xs font-bold text-slate-600 uppercase text-right">Price</th><th className="py-3 px-4 text-xs font-bold text-slate-600 uppercase text-right">Total</th></tr></thead>
-                <tbody className="divide-y divide-slate-100">{selectedOrder.order_items.map((item, idx) => (<tr key={idx}><td className="py-4 px-4 font-bold text-slate-900">{item.name}</td><td className="p-4 text-slate-700 font-medium text-right">{item.quantity} {item.unit}</td><td className="p-4 text-slate-700 font-medium text-right">₹{item.price}</td><td className="p-4 font-bold text-slate-900 text-right">₹{(item.quantity * item.price).toLocaleString()}</td></tr>))}</tbody>
-              </table>
-            </div>
-            <div className="bg-slate-900 p-6 text-white flex justify-between items-center shrink-0 print:bg-black"><p className="text-slate-300 text-sm mb-1 font-medium">Grand Total</p><p className="text-2xl font-bold text-white print:text-black">₹{selectedOrder.total_amount.toLocaleString()}</p></div>
-          </div>
-        </div>
-      )}
-
-      {/* NEGOTIATION MODAL */}
-      {negotiatingOrder && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setNegotiatingOrder(null)}></div>
-          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-4xl overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
-            <div className="bg-slate-50 p-5 md:p-6 border-b border-slate-200 flex justify-between items-center shrink-0"><div><h3 className="text-xl font-bold text-slate-900">B2B Order Quote</h3><p className="text-sm font-mono text-slate-600 uppercase mt-0.5">#{negotiatingOrder.id.split('-')[0]}</p></div><button onClick={() => setNegotiatingOrder(null)} className="p-2 text-slate-500 hover:bg-slate-200 hover:text-slate-900 rounded-full transition-colors"><X size={20}/></button></div>
-            <div className="p-5 md:p-6 overflow-y-auto flex-1 bg-slate-50/50 flex flex-col lg:flex-row gap-8">
-              <div className="flex-1"><h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-4 border-b border-slate-200 pb-2">Order Summary</h4><div className="space-y-3 mb-6">{negotiatingOrder.order_items.map((item, idx) => (<div key={idx} className="flex justify-between items-center bg-white p-3 rounded-lg border border-slate-200 text-sm shadow-sm"><div><span className="font-bold text-slate-900">{item.name}</span><span className="text-slate-600 font-medium block text-xs">{item.quantity} {item.unit} @ ₹{item.price}</span></div><div className="font-bold text-slate-900">₹{(item.quantity * item.price).toLocaleString()}</div></div>))}</div><div className="flex justify-between items-center bg-indigo-50 p-4 rounded-xl border border-indigo-200 shadow-sm"><span className="font-bold text-indigo-900">Base Materials Total</span><span className="text-lg font-bold text-indigo-800">₹{negotiatingOrder.total_amount.toLocaleString()}</span></div></div>
-              <div className="w-full lg:w-80 shrink-0"><h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-4 border-b border-slate-200 pb-2">Apply Charges & Terms</h4>
-                <form id="negotiation-form" onSubmit={handleApproveB2BOrder} className="space-y-3">
-                  <div className="flex items-center justify-between gap-4"><label className="text-xs font-bold text-slate-700">Freight</label><div className="relative w-36"><span className="absolute left-3 top-2 text-slate-500 font-bold">₹</span><input type="number" className="w-full pl-7 p-2 text-right bg-white border border-slate-300 text-slate-900 rounded-lg text-sm font-bold" value={negoForm.freight} onChange={e => setNegoForm({...negoForm, freight: Number(e.target.value)})} /></div></div>
-                  <div className="flex items-center justify-between gap-4"><label className="text-xs font-bold text-slate-700">Tolls</label><div className="relative w-36"><span className="absolute left-3 top-2 text-slate-500 font-bold">₹</span><input type="number" className="w-full pl-7 p-2 text-right bg-white border border-slate-300 text-slate-900 rounded-lg text-sm font-bold" value={negoForm.toll} onChange={e => setNegoForm({...negoForm, toll: Number(e.target.value)})} /></div></div>
-                  <div className="flex items-center justify-between gap-4"><label className="text-xs font-bold text-slate-700">Loading</label><div className="relative w-36"><span className="absolute left-3 top-2 text-slate-500 font-bold">₹</span><input type="number" className="w-full pl-7 p-2 text-right bg-white border border-slate-300 text-slate-900 rounded-lg text-sm font-bold" value={negoForm.loading} onChange={e => setNegoForm({...negoForm, loading: Number(e.target.value)})} /></div></div>
-                  <div className="flex items-center justify-between gap-4"><label className="text-xs font-bold text-slate-700">Packaging</label><div className="relative w-36"><span className="absolute left-3 top-2 text-slate-500 font-bold">₹</span><input type="number" className="w-full pl-7 p-2 text-right bg-white border border-slate-300 text-slate-900 rounded-lg text-sm font-bold" value={negoForm.packaging} onChange={e => setNegoForm({...negoForm, packaging: Number(e.target.value)})} /></div></div>
-                  <div className="flex items-center justify-between gap-4"><label className="text-xs font-bold text-slate-700">Gateway</label><div className="relative w-36"><span className="absolute left-3 top-2 text-slate-500 font-bold">₹</span><input type="number" className="w-full pl-7 p-2 text-right bg-white border border-slate-300 text-slate-900 rounded-lg text-sm font-bold" value={negoForm.gateway} onChange={e => setNegoForm({...negoForm, gateway: Number(e.target.value)})} /></div></div>
-                  <div className="flex items-center justify-between gap-4"><label className="text-xs font-bold text-slate-700">Other</label><div className="relative w-36"><span className="absolute left-3 top-2 text-slate-500 font-bold">₹</span><input type="number" className="w-full pl-7 p-2 text-right bg-white border border-slate-300 text-slate-900 rounded-lg text-sm font-bold" value={negoForm.other} onChange={e => setNegoForm({...negoForm, other: Number(e.target.value)})} /></div></div>
-                  
-                  <div className="flex items-center justify-between gap-4 pt-2 border-t border-slate-200 mt-2">
-                    <label className="text-xs font-bold text-slate-700">Payment Terms</label>
-                    <select className="w-36 p-2 bg-white border border-slate-300 text-slate-900 rounded-lg text-xs font-bold shadow-sm" value={negoForm.payment_terms} onChange={e => setNegoForm({...negoForm, payment_terms: e.target.value})}>
-                      <option value="100% Advance" className="bg-white text-slate-900">100% Advance</option>
-                      <option value="10% Adv, 90% Delivery" className="bg-white text-slate-900">10% Adv, 90% Delivery</option>
-                      <option value="Net 15 Days" className="bg-white text-slate-900">Net 15 Days</option>
-                      <option value="Net 30 Days" className="bg-white text-slate-900">Net 30 Days</option>
-                    </select>
+                    <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200">
+                      <div className="flex items-center gap-3 mb-4">
+                        <div className="w-10 h-10 bg-emerald-100 text-emerald-600 flex items-center justify-center rounded-xl"><Banknote size={20}/></div>
+                        <h4 className="font-bold text-slate-800 text-lg">Redemption Value</h4>
+                      </div>
+                      <label className="block text-xs font-bold mb-2 uppercase text-slate-500">INR Value per 1 R-Cash Point</label>
+                      <div className="relative">
+                        <span className="absolute left-4 top-4 text-slate-400 font-bold text-lg">₹</span>
+                        <input type="number" step="0.1" required className="w-full p-4 pl-10 bg-white border border-slate-300 rounded-xl font-bold text-slate-900 outline-none focus:ring-2 focus:ring-emerald-500 shadow-sm transition-shadow text-lg" value={storeSettings.inr_per_reward_point} onChange={e => setStoreSettings({...storeSettings, inr_per_reward_point: Number(e.target.value)})} />
+                      </div>
+                    </div>
                   </div>
 
-                  <div className="pt-4 mt-4 border-t border-slate-300"><div className="flex justify-between items-center mb-1"><span className="text-sm font-bold text-slate-900">Final Total</span><span className="text-2xl font-bold text-amber-700">₹{(negotiatingOrder.total_amount + Number(negoForm.freight) + Number(negoForm.toll) + Number(negoForm.loading) + Number(negoForm.packaging) + Number(negoForm.gateway) + Number(negoForm.other)).toLocaleString()}</span></div></div>
+                  <div className="bg-indigo-50 border border-indigo-100 rounded-2xl p-6 flex flex-col sm:flex-row items-center justify-between gap-4">
+                    <div>
+                      <p className="text-xs font-bold text-indigo-400 uppercase tracking-wider mb-1">Live Engine Preview</p>
+                      <p className="text-indigo-900 font-medium">If a customer buys <strong className="font-bold">100 kg</strong> of product, they earn <strong className="font-bold">{100 * storeSettings.reward_points_per_unit} R-Cash</strong>, worth <strong className="font-bold text-emerald-600">₹{(100 * storeSettings.reward_points_per_unit * storeSettings.inr_per_reward_point).toFixed(2)}</strong> off their next order.</p>
+                    </div>
+                    <button type="submit" disabled={isSubmitting} className="w-full sm:w-auto bg-indigo-600 text-white font-bold py-4 px-8 rounded-xl shadow-md flex items-center justify-center gap-2 hover:bg-indigo-700 transition-transform active:scale-95 shrink-0">
+                      {isSubmitting ? <Loader2 size={18} className="animate-spin"/> : <Save size={18}/>} Save Config
+                    </button>
+                  </div>
                 </form>
               </div>
             </div>
-            <div className="bg-white p-5 border-t border-slate-200 flex justify-end shrink-0 gap-3"><button onClick={() => setNegotiatingOrder(null)} className="px-5 py-2.5 rounded-xl font-bold text-slate-700 hover:bg-slate-100 transition-colors">Cancel</button><button type="submit" form="negotiation-form" disabled={isSaving} className="flex items-center gap-2 bg-amber-500 hover:bg-amber-600 text-white px-6 py-2.5 rounded-xl font-bold shadow-md transition-colors">{isSaving ? <Loader2 size={18} className="animate-spin" /> : <MessageCircle size={18} />} Approve & WA</button></div>
+          </div>
+        )}
+      </main>
+
+      {/* --- GRANULAR PERMISSION MATRIX MODAL --- */}
+      {matrixUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => {setMatrixUser(null); setExpandedModule(null);}}></div>
+          <div className="relative bg-white rounded-3xl shadow-2xl w-full max-w-3xl overflow-hidden animate-in zoom-in-95 flex flex-col max-h-[90vh]">
+            <div className="p-6 border-b border-slate-100 bg-slate-50 flex justify-between items-start">
+              <div>
+                <h3 className="text-xl font-bold text-slate-900 flex items-center gap-2"><ShieldCheck className="text-indigo-600"/> Edit Access Matrix</h3>
+                <p className="text-sm text-slate-500 mt-1 flex items-center gap-2">Configuring permissions for <strong className="text-indigo-600">{matrixUser.full_name || matrixUser.email}</strong> <span className="text-[10px] bg-slate-200 text-slate-600 px-2 py-0.5 rounded font-mono font-bold tracking-wider">{matrixUser.email}</span></p>
+              </div>
+              <button onClick={() => {setMatrixUser(null); setExpandedModule(null);}} className="p-2 bg-white text-slate-400 hover:text-slate-900 rounded-full shadow-sm"><X size={20}/></button>
+            </div>
+            
+            <div className="p-6 overflow-y-auto flex-1 bg-slate-50/30">
+              <div className="space-y-4">
+                {systemModules.map(mod => {
+                  const isExpanded = expandedModule === mod.id;
+                  const masterAccess = matrixState[mod.id]?._master || 'none';
+                  
+                  return (
+                    <div key={mod.id} className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
+                      <div className="p-4 flex items-center justify-between bg-white hover:bg-slate-50 transition-colors">
+                        <button onClick={() => setExpandedModule(isExpanded ? null : mod.id)} className="flex items-center gap-3 flex-1 text-left">
+                          <div className={`p-2 rounded-lg ${isExpanded ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-100 text-slate-400'}`}>
+                            {isExpanded ? <ChevronUp size={16}/> : <ChevronDown size={16}/>}
+                          </div>
+                          <div>
+                            <p className="font-bold text-slate-900">{mod.label}</p>
+                            <p className="text-[10px] text-slate-400 uppercase tracking-wider">{mod.tabs.length} Sub-Modules</p>
+                          </div>
+                        </button>
+                        
+                        <div className="flex items-center gap-2 bg-slate-50 p-1.5 rounded-xl border border-slate-200 ml-4">
+                          <label className={`cursor-pointer px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${masterAccess === 'none' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-700'}`}>
+                            <input type="radio" className="hidden" checked={masterAccess === 'none'} onChange={() => updateMatrixValue(mod.id, '_master', 'none')} /> None
+                          </label>
+                          <label className={`cursor-pointer px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${masterAccess === 'read' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-400 hover:text-indigo-700'}`}>
+                            <input type="radio" className="hidden" checked={masterAccess === 'read'} onChange={() => updateMatrixValue(mod.id, '_master', 'read')} /> Read
+                          </label>
+                          <label className={`cursor-pointer px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${masterAccess === 'write' ? 'bg-white text-emerald-700 shadow-sm' : 'text-slate-400 hover:text-emerald-700'}`}>
+                            <input type="radio" className="hidden" checked={masterAccess === 'write'} onChange={() => updateMatrixValue(mod.id, '_master', 'write')} /> Read+Write
+                          </label>
+                        </div>
+                      </div>
+
+                      {isExpanded && (
+                        <div className="bg-slate-50 border-t border-slate-100 p-4 space-y-2">
+                          <div className="flex justify-between items-center px-4 mb-2 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                            <span>Specific Tab Access</span>
+                            <span>Permission Level</span>
+                          </div>
+                          {mod.tabs.map(tab => {
+                            const tabAccess = matrixState[mod.id]?.[tab.id] || 'none';
+                            return (
+                              <div key={tab.id} className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200 shadow-sm">
+                                <span className="text-sm font-medium text-slate-700">{tab.label}</span>
+                                <div className="flex items-center gap-1">
+                                  <label className={`cursor-pointer px-2 py-1 rounded text-[10px] font-bold transition-colors ${tabAccess === 'none' ? 'bg-slate-200 text-slate-700' : 'text-slate-400 hover:bg-slate-100'}`}><input type="radio" className="hidden" checked={tabAccess === 'none'} onChange={() => updateMatrixValue(mod.id, tab.id, 'none')} /> None</label>
+                                  <label className={`cursor-pointer px-2 py-1 rounded text-[10px] font-bold transition-colors ${tabAccess === 'read' ? 'bg-indigo-100 text-indigo-700' : 'text-slate-400 hover:bg-indigo-50'}`}><input type="radio" className="hidden" checked={tabAccess === 'read'} onChange={() => updateMatrixValue(mod.id, tab.id, 'read')} /> Read</label>
+                                  <label className={`cursor-pointer px-2 py-1 rounded text-[10px] font-bold transition-colors ${tabAccess === 'write' ? 'bg-emerald-100 text-emerald-700' : 'text-slate-400 hover:bg-emerald-50'}`}><input type="radio" className="hidden" checked={tabAccess === 'write'} onChange={() => updateMatrixValue(mod.id, tab.id, 'write')} /> Write</label>
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+            
+            <div className="p-6 border-t border-slate-100 bg-white flex justify-end gap-3 shrink-0">
+              <button onClick={() => {setMatrixUser(null); setExpandedModule(null);}} className="px-6 py-3 rounded-xl font-bold text-slate-600 hover:bg-slate-100 transition-colors">Cancel</button>
+              <button onClick={handleSavePermissions} disabled={isSubmitting} className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-8 py-3 rounded-xl font-bold shadow-md transition-transform active:scale-95">
+                {isSubmitting ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />} Save Matrix Configuration
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* --- TEMPORARY ACCESS MODAL --- */}
+      {accessModalUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setAccessModalUser(null)}></div>
+          <div className="relative bg-white rounded-3xl shadow-2xl w-full max-w-sm p-6 animate-in zoom-in-95">
+            <h3 className="text-lg font-bold text-slate-900 mb-1">Grant 24H Guest Pass</h3>
+            <p className="text-sm text-slate-500 mb-6">Allow <strong className="text-indigo-600">{accessModalUser.full_name || accessModalUser.email}</strong> to temporarily access another department&apos;s dashboard.</p>
+            <div className="space-y-3">
+              {['inventory', 'finance', 'dispatch', 'sales', 'delivery'].map(mod => (
+                <button key={mod} onClick={() => handleGrantGuestPass(mod)} disabled={isSubmitting} className="w-full text-left px-4 py-3 bg-slate-50 hover:bg-indigo-50 border border-slate-200 hover:border-indigo-300 rounded-xl font-bold text-slate-700 hover:text-indigo-700 transition-colors uppercase tracking-wider text-sm flex items-center justify-between">
+                  {mod} <ArrowRight size={16}/>
+                </button>
+              ))}
+            </div>
+            <button onClick={() => setAccessModalUser(null)} className="w-full mt-4 py-3 text-sm font-bold text-slate-400 hover:text-slate-600">Cancel</button>
+          </div>
+        </div>
+      )}
+
+      {/* --- SUPER ADMIN OVERRIDE MODAL --- */}
+      {selectedOrder && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setSelectedOrder(null)}></div>
+          <div className="relative bg-white rounded-3xl shadow-2xl w-full max-w-xl overflow-hidden animate-in zoom-in-95 flex flex-col max-h-[90vh]">
+            <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-amber-50">
+              <div><h3 className="text-xl font-bold text-amber-900 flex items-center gap-2"><ShieldAlert size={20}/> Executive Override</h3><p className="text-xs font-bold text-amber-700 uppercase tracking-wider mt-1">Order #{selectedOrder.id.split('-')[0]}</p></div>
+              <button onClick={() => setSelectedOrder(null)} className="p-2 bg-white text-slate-400 hover:text-slate-900 rounded-full shadow-sm"><X size={20}/></button>
+            </div>
+            <div className="p-8 overflow-y-auto flex-1 space-y-8 bg-white">
+              <div>
+                <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Order Lifecycle Trace</p>
+                <div className="relative border-l-2 border-slate-200 ml-3 space-y-6 pb-2">
+                  {['New Order', 'Pending Approval', 'Awaiting Payment', 'Processing (Milling)', 'Dispatched', 'Delivered'].map((step, idx) => {
+                    const currentIdx = ['New Order', 'Pending Approval', 'Awaiting Payment', 'Processing (Milling)', 'Dispatched', 'Delivered'].indexOf(selectedOrder.status)
+                    const isCompleted = idx <= currentIdx
+                    const isCurrent = idx === currentIdx
+                    return (
+                      <div key={step} className="relative pl-6"><div className={`absolute -left-[9px] top-1 w-4 h-4 rounded-full border-2 ${isCompleted ? 'bg-emerald-500 border-emerald-500' : 'bg-white border-slate-300'} ${isCurrent ? 'ring-4 ring-emerald-100' : ''}`}></div><p className={`text-sm font-bold ${isCurrent ? 'text-slate-900' : isCompleted ? 'text-slate-600' : 'text-slate-400'}`}>{step}</p></div>
+                    )
+                  })}
+                </div>
+              </div>
+              <div className="bg-rose-50 border border-rose-100 rounded-2xl p-6">
+                <h4 className="font-bold text-rose-900 mb-2 flex items-center gap-2"><AlertOctagon size={16}/> Force Pipeline Advancement</h4>
+                <p className="text-xs text-rose-700 mb-4">Warning: Forcing this order to the next stage will bypass standard departmental checks. This action is permanently logged.</p>
+                <button onClick={() => handleForceAdvance(selectedOrder.id, selectedOrder.status)} disabled={isSubmitting || selectedOrder.status === 'Delivered'} className="w-full bg-rose-600 hover:bg-rose-700 text-white font-bold py-3.5 rounded-xl flex items-center justify-center gap-2 shadow-md transition-transform active:scale-95 disabled:opacity-50">{isSubmitting ? <Loader2 size={18} className="animate-spin"/> : <ArrowRight size={18}/>} Bypass Guardrails & Force Advance</button>
+              </div>
+            </div>
           </div>
         </div>
       )}
