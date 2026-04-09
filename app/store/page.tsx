@@ -1,10 +1,10 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
-import { supabase } from '../../lib/supabase' // Ensure this path is correct based on your folder structure
+import { supabase } from '../../lib/supabase'
 import { 
   ShoppingCart, User, Search, Package, MapPin, 
-  ShieldCheck, RefreshCw, FileText, Building2, Trash2, ArrowLeft
+  ShieldCheck, RefreshCw, FileText, Building2, Trash2, ArrowLeft, MessageSquare, LogOut, Send
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 
@@ -21,7 +21,7 @@ export default function CustomerStorefront() {
   
   // View State
   const [activeView, setActiveView] = useState<'shop' | 'account' | 'cart'>('shop')
-  const [activeAccountTab, setActiveAccountTab] = useState<'details' | 'history'>('details')
+  const [activeAccountTab, setActiveAccountTab] = useState<'details' | 'history' | 'addresses' | 'negotiations'>('details')
   const [activeCategory, setActiveCategory] = useState('All')
 
   const [products, setProducts] = useState<Product[]>([])
@@ -33,6 +33,18 @@ export default function CustomerStorefront() {
   // Subscription Modal State
   const [subModalProduct, setSubModalProduct] = useState<Product | null>(null)
   const [subInterval, setSubInterval] = useState<'One-time' | 'Weekly' | 'Monthly'>('One-time')
+
+  // Negotiation Form State
+  const [negotiationForm, setNegotiationForm] = useState({
+    additionalFeatures: '',
+    basicCost: '',
+    loading: '',
+    packaging: '',
+    freight: '',
+    unloading: '',
+    others: '',
+    terms: ''
+  })
 
   const fetchStoreData = useCallback(async (userId: string) => {
     const { data: prodData } = await supabase.from('products').select('*').order('name', { ascending: true })
@@ -49,17 +61,21 @@ export default function CustomerStorefront() {
       if (!session) return window.location.replace('/auth')
       const { data: roleData } = await supabase.from('user_roles').select('*').eq('id', session.user.id).single()
       
-      if (roleData) {
-        if (isMounted) {
-          setCustomer(roleData as UserProfile)
-          fetchStoreData(session.user.id)
-        }
+      if (roleData && isMounted) {
+        setCustomer(roleData as UserProfile)
+        fetchStoreData(session.user.id)
       }
       if (isMounted) setIsLoadingAuth(false)
     }
     initStore()
     return () => { isMounted = false }
   }, [fetchStoreData])
+
+  // Handlers
+  const handleSignOut = async () => {
+    await supabase.auth.signOut()
+    window.location.replace('/auth')
+  }
 
   const addToCart = (product: Product, interval: string = 'One-time') => {
     if (product.name.toLowerCase().includes('atta') && interval === 'One-time' && !subModalProduct) {
@@ -91,6 +107,42 @@ export default function CustomerStorefront() {
 
   const cartTotal = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0)
 
+  const handleCheckout = () => {
+    if (cart.length === 0) return;
+    toast.success('Order placed successfully!')
+    setCart([]) 
+    setActiveView('account') 
+    setActiveAccountTab('history') 
+  }
+
+  // --- WhatsApp Negotiation Logic ---
+  const handleProceedToWhatsApp = () => {
+    const whatsappNumber = "919999999999" // TODO: Replace with your actual WhatsApp Business Number
+    const cartSummary = cart.map(item => `${item.product.name} (x${item.quantity})`).join(', ')
+    
+    const message = `*New Bulk Negotiation Request*
+---
+*Items Required:* ${cart.length > 0 ? cartSummary : 'Custom Requirements'}
+*Base Cart Total:* ₹${cartTotal}
+
+*Proposed Cost Breakdown:*
+- Basic Cost: ${negotiationForm.basicCost || 'N/A'}
+- Loading: ${negotiationForm.loading || 'N/A'}
+- Packaging: ${negotiationForm.packaging || 'N/A'}
+- Freight: ${negotiationForm.freight || 'N/A'}
+- Unloading: ${negotiationForm.unloading || 'N/A'}
+- Others: ${negotiationForm.others || 'N/A'}
+
+*Additional Features Required:* ${negotiationForm.additionalFeatures || 'None'}
+
+*Terms & Conditions for Sale:* ${negotiationForm.terms || 'Standard Terms'}
+
+*Client Details:* ${customer?.full_name || 'Guest'} (${customer?.email})
+${customer?.company_name ? `Company: ${customer.company_name}` : ''}`
+
+    window.open(`https://wa.me/${whatsappNumber}?text=${encodeURIComponent(message)}`, '_blank')
+  }
+
   const categories = ['All', 'Retail Flour', 'Modern', 'Flour', 'Dals', 'Other Pulses, Seeds & Grains', 'Rice & Millets', 'Whole Spices', 'Powdered Spices']
   const filteredProducts = products.filter(p => 
     (activeCategory === 'All' || p.category?.trim().toLowerCase() === activeCategory.trim().toLowerCase()) &&
@@ -102,6 +154,7 @@ export default function CustomerStorefront() {
   return (
     <div className="min-h-screen bg-[#F8FAFC] font-sans text-slate-900">
       
+      {/* HEADER */}
       <header className="bg-white border-b border-slate-200 sticky top-0 z-40">
         <div className="max-w-[1400px] mx-auto px-4 h-[72px] flex items-center justify-between">
           <div className="flex items-center gap-3 cursor-pointer" onClick={() => setActiveView('shop')}>
@@ -133,6 +186,7 @@ export default function CustomerStorefront() {
         </div>
       </header>
 
+      {/* VIEW: SHOP */}
       {activeView === 'shop' && (
         <main>
           <div className="bg-[#0f172a] w-full">
@@ -195,6 +249,7 @@ export default function CustomerStorefront() {
         </main>
       )}
 
+      {/* VIEW: CART */}
       {activeView === 'cart' && (
         <main className="max-w-[1000px] mx-auto px-4 py-10">
           <button onClick={() => setActiveView('shop')} className="flex items-center gap-2 text-slate-500 hover:text-slate-900 font-bold text-sm mb-6 transition-colors">
@@ -269,9 +324,21 @@ export default function CustomerStorefront() {
                     </div>
                   </div>
 
-                  <button className="w-full bg-[#4F46E5] hover:bg-[#4338ca] text-white py-3.5 rounded-xl font-bold shadow-sm transition-colors flex justify-center items-center gap-2">
-                    Proceed to Checkout
-                  </button>
+                  <div className="flex flex-col gap-3">
+                    <button 
+                      onClick={handleCheckout}
+                      className="w-full bg-[#4F46E5] hover:bg-[#4338ca] text-white py-3.5 rounded-xl font-bold shadow-sm transition-colors flex justify-center items-center gap-2"
+                    >
+                      Proceed to Checkout
+                    </button>
+                    
+                    <button 
+                      onClick={() => { setActiveView('account'); setActiveAccountTab('negotiations'); }}
+                      className="w-full bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 py-3.5 rounded-xl font-bold transition-colors flex justify-center items-center gap-2"
+                    >
+                      <MessageSquare size={16}/> Negotiate Bulk Price
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -279,12 +346,13 @@ export default function CustomerStorefront() {
         </main>
       )}
 
+      {/* VIEW: ACCOUNT / PORTAL */}
       {activeView === 'account' && (
         <main className="max-w-[1200px] mx-auto px-4 py-10">
           <div className="flex justify-between items-start mb-8">
             <div>
               <h2 className="text-[28px] font-bold text-slate-900">My Account</h2>
-              <p className="text-slate-500 text-sm mt-1">Manage your recent orders and personal details.</p>
+              <p className="text-slate-500 text-sm mt-1">Manage your recent orders, negotiations, and personal details.</p>
             </div>
             <button className="bg-[#0f172a] text-white px-5 py-2.5 rounded-lg text-sm font-bold flex items-center gap-2 hover:bg-slate-800 transition-colors">
               <RefreshCw size={16}/> 1-Click Reorder
@@ -292,6 +360,7 @@ export default function CustomerStorefront() {
           </div>
 
           <div className="flex flex-col md:flex-row gap-8">
+            {/* SIDEBAR */}
             <div className="w-full md:w-64 shrink-0 space-y-2">
               <button 
                 onClick={() => setActiveAccountTab('details')}
@@ -299,15 +368,40 @@ export default function CustomerStorefront() {
               >
                 <Building2 size={18}/> Account Details
               </button>
+              
               <button 
                 onClick={() => setActiveAccountTab('history')}
                 className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-bold transition-colors ${activeAccountTab === 'history' ? 'bg-[#4F46E5] text-white' : 'text-slate-600 hover:bg-slate-100'}`}
               >
                 <Package size={18}/> Order History
               </button>
+
+              <button 
+                onClick={() => setActiveAccountTab('addresses')}
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-bold transition-colors ${activeAccountTab === 'addresses' ? 'bg-[#4F46E5] text-white' : 'text-slate-600 hover:bg-slate-100'}`}
+              >
+                <MapPin size={18}/> Saved Addresses
+              </button>
+
+              <button 
+                onClick={() => setActiveAccountTab('negotiations')}
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-bold transition-colors ${activeAccountTab === 'negotiations' ? 'bg-[#4F46E5] text-white' : 'text-slate-600 hover:bg-slate-100'}`}
+              >
+                <MessageSquare size={18}/> Negotiation Hub
+              </button>
+
+              {/* SIGNOUT BUTTON */}
+              <button 
+                onClick={handleSignOut}
+                className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-bold text-red-500 hover:bg-red-50 transition-colors mt-8"
+              >
+                <LogOut size={18}/> Sign Out
+              </button>
             </div>
 
             <div className="flex-1 space-y-6">
+              
+              {/* DETAILS TAB */}
               {activeAccountTab === 'details' && (
                 <>
                   <div className="bg-gradient-to-r from-[#ff7e22] to-[#ff5722] rounded-2xl p-6 text-white shadow-sm relative overflow-hidden">
@@ -359,19 +453,12 @@ export default function CustomerStorefront() {
                           <p className="flex justify-between"><span className="text-slate-500 font-medium">GST:</span> <span className="font-bold text-slate-900">-</span></p>
                         </div>
                       </div>
-                      <div>
-                        <h4 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">Billing Address</h4>
-                        <p className="text-sm font-medium text-slate-900">{customer?.billing_address || '-'}</p>
-                      </div>
-                      <div>
-                        <h4 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">Shipping Address</h4>
-                        <p className="text-sm font-medium text-slate-900">-</p>
-                      </div>
                     </div>
                   </div>
                 </>
               )}
 
+              {/* ORDER HISTORY TAB */}
               {activeAccountTab === 'history' && (
                 <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
                   <div className="p-6 border-b border-slate-100 bg-slate-50/50">
@@ -401,11 +488,103 @@ export default function CustomerStorefront() {
                   </div>
                 </div>
               )}
+
+              {/* ADDRESSES TAB */}
+              {activeAccountTab === 'addresses' && (
+                <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden p-6">
+                  <div className="flex justify-between items-center mb-6">
+                    <h3 className="font-bold text-lg text-slate-900">Saved Addresses</h3>
+                    <button className="text-sm font-bold text-[#4F46E5] bg-indigo-50 px-4 py-2 rounded-lg hover:bg-indigo-100 transition-colors">
+                      + Add New Address
+                    </button>
+                  </div>
+                  
+                  {customer?.billing_address ? (
+                    <div className="border border-slate-200 rounded-xl p-5 relative">
+                      <span className="absolute top-4 right-4 bg-emerald-50 text-emerald-600 text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded">Primary</span>
+                      <h4 className="font-bold text-slate-900 mb-2">Office / Billing Address</h4>
+                      <p className="text-slate-500 text-sm max-w-sm leading-relaxed">{customer.billing_address}</p>
+                      <div className="mt-4 flex gap-4">
+                        <button className="text-sm font-bold text-[#4F46E5] hover:underline">Edit</button>
+                        <button className="text-sm font-bold text-red-500 hover:underline">Delete</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-center p-10 bg-slate-50 rounded-xl border border-dashed border-slate-200">
+                      <MapPin size={32} className="mx-auto text-slate-300 mb-3"/>
+                      <p className="text-slate-500 font-medium">No saved addresses found.</p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* NEGOTIATIONS TAB - FIXED LAYOUT */}
+              {activeAccountTab === 'negotiations' && (
+                <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-6 md:p-8">
+                  <h3 className="text-xl font-bold text-slate-900 mb-2">Request Bulk Quote</h3>
+                  <p className="text-sm text-slate-500 mb-8">Specify your cost requirements below to generate a WhatsApp proposal.</p>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold text-slate-500 uppercase ml-1">Additional Features</label>
+                      <input type="text" placeholder="e.g. Special Sorting, Custom Labels" className="w-full border border-slate-200 p-3.5 rounded-xl text-sm focus:outline-none focus:border-[#4F46E5] focus:ring-1 focus:ring-[#4F46E5] transition-colors" onChange={e => setNegotiationForm({...negotiationForm, additionalFeatures: e.target.value})} />
+                    </div>
+                    
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold text-slate-500 uppercase ml-1">Freight / Transport</label>
+                      <input type="number" placeholder="Enter amount (₹)" className="w-full border border-slate-200 p-3.5 rounded-xl text-sm focus:outline-none focus:border-[#4F46E5] focus:ring-1 focus:ring-[#4F46E5] transition-colors" onChange={e => setNegotiationForm({...negotiationForm, freight: e.target.value})} />
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold text-slate-500 uppercase ml-1">Basic Cost</label>
+                      <input type="number" placeholder="Enter amount (₹)" className="w-full border border-slate-200 p-3.5 rounded-xl text-sm focus:outline-none focus:border-[#4F46E5] focus:ring-1 focus:ring-[#4F46E5] transition-colors" onChange={e => setNegotiationForm({...negotiationForm, basicCost: e.target.value})} />
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold text-slate-500 uppercase ml-1">Unloading Charges</label>
+                      <input type="number" placeholder="Enter amount (₹)" className="w-full border border-slate-200 p-3.5 rounded-xl text-sm focus:outline-none focus:border-[#4F46E5] focus:ring-1 focus:ring-[#4F46E5] transition-colors" onChange={e => setNegotiationForm({...negotiationForm, unloading: e.target.value})} />
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold text-slate-500 uppercase ml-1">Loading Charges</label>
+                      <input type="number" placeholder="Enter amount (₹)" className="w-full border border-slate-200 p-3.5 rounded-xl text-sm focus:outline-none focus:border-[#4F46E5] focus:ring-1 focus:ring-[#4F46E5] transition-colors" onChange={e => setNegotiationForm({...negotiationForm, loading: e.target.value})} />
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold text-slate-500 uppercase ml-1">Others</label>
+                      <input type="number" placeholder="Enter amount (₹)" className="w-full border border-slate-200 p-3.5 rounded-xl text-sm focus:outline-none focus:border-[#4F46E5] focus:ring-1 focus:ring-[#4F46E5] transition-colors" onChange={e => setNegotiationForm({...negotiationForm, others: e.target.value})} />
+                    </div>
+
+                    <div className="space-y-1 md:col-span-2">
+                      <label className="text-xs font-bold text-slate-500 uppercase ml-1">Packaging Cost</label>
+                      <input type="number" placeholder="Enter amount (₹)" className="w-full border border-slate-200 p-3.5 rounded-xl text-sm focus:outline-none focus:border-[#4F46E5] focus:ring-1 focus:ring-[#4F46E5] transition-colors" onChange={e => setNegotiationForm({...negotiationForm, packaging: e.target.value})} />
+                    </div>
+                  </div>
+
+                  <div className="mt-5 space-y-1">
+                    <label className="text-xs font-bold text-slate-500 uppercase ml-1">Terms & Conditions for Sale</label>
+                    <textarea 
+                      placeholder="Specify your required terms, conditions, or specific notes regarding this negotiation..." 
+                      className="w-full border border-slate-200 p-3.5 rounded-xl text-sm min-h-[120px] focus:outline-none focus:border-[#4F46E5] focus:ring-1 focus:ring-[#4F46E5] transition-colors resize-y" 
+                      onChange={e => setNegotiationForm({...negotiationForm, terms: e.target.value})} 
+                    />
+                  </div>
+
+                  <button 
+                    onClick={handleProceedToWhatsApp}
+                    className="mt-8 w-full bg-[#25D366] hover:bg-[#1ebd57] text-white py-4 rounded-xl font-bold flex items-center justify-center gap-2 shadow-sm transition-colors"
+                  >
+                    <Send size={18}/> Proceed to WhatsApp Business
+                  </button>
+                </div>
+              )}
+
             </div>
           </div>
         </main>
       )}
 
+      {/* ATTA SUBSCRIPTION MODAL */}
       {subModalProduct && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setSubModalProduct(null)}></div>
