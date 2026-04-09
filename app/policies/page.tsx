@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { ChevronLeft, FileText, Banknote, ShieldAlert, Scale, CheckCircle2 } from 'lucide-react'
+import { ChevronLeft, FileText, Banknote, ShieldAlert, Scale, CheckCircle2, AlertTriangle } from 'lucide-react'
 
 export default function PoliciesPage() {
   return (

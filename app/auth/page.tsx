@@ -10,7 +10,7 @@ import toast from 'react-hot-toast'
 
 export default function DualGateAuth() {
   const [portalType, setPortalType] = useState<'customer' | 'staff'>('customer')
-  const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signIn')
+  const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin')
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   const [formData, setFormData] = useState({
@@ -107,14 +107,14 @@ export default function DualGateAuth() {
           <div className="flex p-1 bg-slate-100 rounded-xl mb-8 relative z-10">
             <button 
               type="button"
-              onClick={() => { setPortalType('customer'); setAuthMode('signIn'); }} 
+              onClick={() => { setPortalType('customer'); setAuthMode('signin'); }} 
               className={`flex-1 py-2.5 text-sm font-bold rounded-lg transition-all flex items-center justify-center gap-2 ${portalType === 'customer' ? 'bg-white shadow-sm text-indigo-700' : 'text-slate-500 hover:text-slate-700'}`}
             >
               <Store size={16}/> Customer
             </button>
             <button 
               type="button"
-              onClick={() => { setPortalType('staff'); setAuthMode('signIn'); }} 
+              onClick={() => { setPortalType('staff'); setAuthMode('signin'); }} 
               className={`flex-1 py-2.5 text-sm font-bold rounded-lg transition-all flex items-center justify-center gap-2 ${portalType === 'staff' ? 'bg-slate-900 shadow-sm text-white' : 'text-slate-500 hover:text-slate-700'}`}
             >
               <ShieldCheck size={16}/> Staff Portal
